@@ -1,0 +1,42 @@
+{
+  "name": "@dhiya/vue",
+  "version": "1.0.0",
+  "description": "Vue 3 bindings for Dhiya - Client-side RAG framework",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "vue",
+    "vue3",
+    "rag",
+    "dhiya",
+    "composables",
+    "ai",
+    "chatbot"
+  ],
+  "author": "Deep Parmar <deep.parmar@sunbots.in>",
+  "license": "MIT",
+  "peerDependencies": {
+    "vue": "^3.0.0",
+    "dhiya-npm": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "vue": "^3.0.0",
+    "typescript": "^5.0.0"
+  }
+}

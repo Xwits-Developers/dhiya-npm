@@ -1,0 +1,41 @@
+{
+  "name": "@dhiya/svelte",
+  "version": "1.0.0",
+  "description": "Svelte bindings for Dhiya - Client-side RAG framework",
+  "type": "module",
+  "svelte": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "svelte": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "svelte",
+    "rag",
+    "dhiya",
+    "stores",
+    "ai",
+    "chatbot"
+  ],
+  "author": "Deep Parmar <deep.parmar@sunbots.in>",
+  "license": "MIT",
+  "peerDependencies": {
+    "svelte": "^4.0.0 || ^5.0.0",
+    "dhiya-npm": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "svelte": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

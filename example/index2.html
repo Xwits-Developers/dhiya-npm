@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Minimal Transformers Test</title>
+  </head>
+  <body>
+    <h1>Minimal Transformers Import Test</h1>
+    <pre id="log">Loading...</pre>
+    <script type="module">
+      const logEl = document.getElementById('log');
+      function log(msg){ logEl.textContent += "\n" + msg; }
+      log('Starting dynamic import...');
+      import('./src/minimal-transformers-test.ts').then(()=>{
+        log('Import script executed. Check console for details.');
+      }).catch(e=>{
+        log('Import failed: ' + e.message);
+        console.error(e);
+      });
+    </script>
+  </body>
+</html>

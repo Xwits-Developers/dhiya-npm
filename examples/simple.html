@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dhiya NPM - Simple Example</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    
+    .header {
+      text-align: center;
+      color: white;
+      margin-bottom: 40px;
+    }
+    
+    .header h1 {
+      font-size: 48px;
+      margin-bottom: 10px;
+    }
+    
+    .header p {
+      font-size: 18px;
+      opacity: 0.9;
+    }
+    
+    .status {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    .status-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #eee;
+    }
+    
+    .status-item:last-child {
+      border-bottom: none;
+    }
+    
+    .chat-container {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      min-height: 400px;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      margin-bottom: 20px;
+      padding: 10px;
+    }
+    
+    .message {
+      margin-bottom: 15px;
+      padding: 12px;
+      border-radius: 8px;
+      line-height: 1.5;
+    }
+    
+    .message.user {
+      background: #667eea;
+      color: white;
+      margin-left: 60px;
+    }
+    
+    .message.assistant {
+      background: #f3f4f6;
+      color: #1f2937;
+      margin-right: 60px;
+    }
+    
+    .input-container {
+      display: flex;
+      gap: 10px;
+    }
+    
+    input {
+      flex: 1;
+      padding: 12px;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+    
+    input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    
+    button {
+      padding: 12px 24px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    button:hover {
+      background: #5568d3;
+    }
+    
+    button:disabled {
+      background: #9ca3af;
+      cursor: not-allowed;
+    }
+    
+    .loading {
+      text-align: center;
+      color: #6b7280;
+      padding: 20px;
+    }
+    
+    .badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    
+    .badge.success {
+      background: #10b981;
+      color: white;
+    }
+    
+    .badge.loading {
+      background: #f59e0b;
+      color: white;
+    }
+    
+    .badge.error {
+      background: #ef4444;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🧠 Dhiya</h1>
+      <p>Client-Side RAG Framework</p>
+    </div>
+    
+    <div class="status" id="status">
+      <h3>System Status</h3>
+      <div class="status-item">
+        <span>Initialization:</span>
+        <span id="init-status" class="badge loading">Loading...</span>
+      </div>
+      <div class="status-item">
+        <span>Embeddings:</span>
+        <span id="embed-status" class="badge loading">Loading...</span>
+      </div>
+      <div class="status-item">
+        <span>Knowledge Base:</span>
+        <span id="kb-status">0 chunks</span>
+      </div>
+    </div>
+    
+    <div class="chat-container">
+      <div class="messages" id="messages">
+        <div class="message assistant">
+          👋 Hi! I'm Dhiya, your AI assistant. Ask me anything about the knowledge base!
+        </div>
+      </div>
+      
+      <div class="input-container">
+        <input 
+          type="text" 
+          id="query-input" 
+          placeholder="Ask a question..." 
+          disabled
+        />
+        <button id="send-btn" disabled>Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { DhiyaClient } from '../dist/index.js';
+    
+    // Sample knowledge base
+    const sampleKB = {
+      type: 'json',
+      data: [
+        {
+          title: 'About Dhiya',
+          content: 'Dhiya is a client-side RAG (Retrieval-Augmented Generation) framework that runs entirely in the browser. It uses embeddings for semantic search and can work with various knowledge sources including JSON, text files, and URLs.'
+        },
+        {
+          title: 'Features',
+          content: 'Dhiya supports: 1) Zero server dependency - everything runs in your browser, 2) Multiple knowledge source types, 3) Semantic search with vector embeddings, 4) Automatic caching for fast responses, 5) IndexedDB storage for persistence.'
+        },
+        {
+          title: 'Use Cases',
+          content: 'Perfect for: Documentation sites, Personal knowledge bases, Privacy-focused chatbots, Offline-capable applications, Educational platforms, Customer support widgets.'
+        }
+      ]
+    };
+    
+    // Initialize client
+    const client = new DhiyaClient({
+      debug: true,
+      onProgress: (event) => {
+        console.log(`[${event.type}] ${event.message}`, event.progress);
+        updateStatus(event);
+      }
+    });
+    
+    // DOM elements
+    const messages = document.getElementById('messages');
+    const input = document.getElementById('query-input');
+    const sendBtn = document.getElementById('send-btn');
+    
+    // Initialize
+    async function init() {
+      try {
+        await client.initialize();
+        await client.loadKnowledge(sampleKB);
+        
+        // Update UI
+        input.disabled = false;
+        sendBtn.disabled = false;
+        document.getElementById('init-status').className = 'badge success';
+        document.getElementById('init-status').textContent = 'Ready';
+        document.getElementById('embed-status').className = 'badge success';
+        document.getElementById('embed-status').textContent = 'Ready';
+        
+        const status = await client.getStatus();
+        document.getElementById('kb-status').textContent = 
+          `${status.knowledgeBase.chunkCount} chunks`;
+        
+      } catch (error) {
+        console.error('Initialization failed:', error);
+        document.getElementById('init-status').className = 'badge error';
+        document.getElementById('init-status').textContent = 'Error';
+        addMessage('assistant', `❌ Failed to initialize: ${error.message}`);
+      }
+    }
+    
+    // Send query
+    async function sendQuery() {
+      const query = input.value.trim();
+      if (!query) return;
+      
+      // Add user message
+      addMessage('user', query);
+      input.value = '';
+      input.disabled = true;
+      sendBtn.disabled = true;
+      
+      // Show loading
+      const loadingId = addMessage('assistant', '💭 Thinking...');
+      
+      try {
+        const answer = await client.ask(query);
+        
+        // Remove loading
+        document.getElementById(loadingId).remove();
+        
+        // Add answer
+        addMessage('assistant', answer.text);
+        addMessage('assistant', 
+          `<small>Confidence: ${(answer.confidence * 100).toFixed(1)}% | ` +
+          `Time: ${answer.timing.total}ms</small>`
+        );
+        
+      } catch (error) {
+        document.getElementById(loadingId).remove();
+        addMessage('assistant', `❌ Error: ${error.message}`);
+      } finally {
+        input.disabled = false;
+        sendBtn.disabled = false;
+        input.focus();
+      }
+    }
+    
+    // Helper: Add message to chat
+    function addMessage(role, content) {
+      const div = document.createElement('div');
+      div.className = `message ${role}`;
+      div.innerHTML = content;
+      div.id = `msg-${Date.now()}`;
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+      return div.id;
+    }
+    
+    // Helper: Update status
+    function updateStatus(event) {
+      if (event.type === 'embedding_load') {
+        document.getElementById('embed-status').textContent = 
+          `Loading ${event.progress}%`;
+      }
+    }
+    
+    // Event listeners
+    sendBtn.addEventListener('click', sendQuery);
+    input.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') sendQuery();
+    });
+    
+    // Start
+    init();
+  </script>
+</body>
+</html>

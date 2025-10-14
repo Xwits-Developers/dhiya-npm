@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dhiya Package Test</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+    }
+    .status {
+      padding: 15px;
+      margin: 20px 0;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+    .status.loading {
+      background: #fff3cd;
+      color: #856404;
+    }
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+    }
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+    }
+    .test-section {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+    }
+    .test-section h3 {
+      margin-top: 0;
+      color: #495057;
+    }
+    button {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 10px;
+    }
+    button:hover {
+      background: #5568d3;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .result {
+      margin-top: 15px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-left: 4px solid #667eea;
+      border-radius: 4px;
+    }
+    .result pre {
+      margin: 10px 0 0 0;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    input {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ced4da;
+      border-radius: 4px;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🧪 Dhiya Package Test</h1>
+    <p>Testing dhiya-npm as a standalone RAG bot package</p>
+    
+    <div id="status" class="status loading">⏳ Initializing...</div>
+    
+    <div class="test-section">
+      <h3>✅ Test 1: Initialization</h3>
+      <p id="test1-result">Waiting...</p>
+    </div>
+    
+    <div class="test-section">
+      <h3>✅ Test 2: Data Ingestion</h3>
+      <button id="loadBtn" disabled>Load Sample Knowledge</button>
+      <p id="test2-result">Waiting...</p>
+    </div>
+    
+    <div class="test-section">
+      <h3>✅ Test 3: Query & Output</h3>
+      <input id="queryInput" placeholder="Ask a question..." disabled />
+      <button id="askBtn" disabled>Ask</button>
+      <div id="test3-result"></div>
+    </div>
+    
+    <div class="test-section">
+      <h3>📋 Package Info</h3>
+      <div id="packageInfo"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { DhiyaClient } from './dist/index.js';
+    
+    const statusEl = document.getElementById('status');
+    const test1 = document.getElementById('test1-result');
+    const test2 = document.getElementById('test2-result');
+    const test3 = document.getElementById('test3-result');
+    const packageInfo = document.getElementById('packageInfo');
+    const loadBtn = document.getElementById('loadBtn');
+    const askBtn = document.getElementById('askBtn');
+    const queryInput = document.getElementById('queryInput');
+    
+    let client;
+    
+    // Sample knowledge base
+    const sampleKnowledge = {
+      type: 'json',
+      data: [
+        {
+          title: 'Dhiya Framework',
+          content: 'Dhiya is a client-side RAG (Retrieval-Augmented Generation) framework that runs entirely in the browser. It provides semantic search capabilities with optional LLM enhancement, all without requiring a backend server.'
+        },
+        {
+          title: 'RAG Technology',
+          content: 'RAG combines retrieval-based and generation-based approaches to provide accurate, context-aware answers. It retrieves relevant information from a knowledge base and uses it to generate responses, reducing hallucinations.'
+        },
+        {
+          title: 'Browser AI',
+          content: 'Modern browsers can now run AI models locally using technologies like WebGPU, WASM, and ONNX Runtime. This enables privacy-preserving AI applications that work offline.'
+        }
+      ]
+    };
+    
+    async function runTests() {
+      try {
+        // TEST 1: Initialize
+        test1.textContent = '⏳ Initializing client...';
+        client = new DhiyaClient({
+          debug: true,
+          enableLLM: false, // Disable LLM for faster testing
+        });
+        
+        await client.initialize();
+        test1.innerHTML = '✅ <strong>SUCCESS:</strong> Client initialized successfully';
+        
+        // Get status
+        const status = await client.getStatus();
+        packageInfo.innerHTML = `
+          <pre>${JSON.stringify({
+            initialized: status.initialized,
+            embeddings: status.embeddings,
+            chunks: status.knowledgeBase.chunkCount,
+            llmAvailable: status.llm.available
+          }, null, 2)}</pre>
+        `;
+        
+        statusEl.textContent = '✅ Ready for testing';
+        statusEl.className = 'status success';
+        
+        // Enable test 2
+        loadBtn.disabled = false;
+        
+      } catch (error) {
+        console.error('Initialization failed:', error);
+        test1.innerHTML = `❌ <strong>FAILED:</strong> ${error.message}`;
+        statusEl.textContent = '❌ Initialization failed';
+        statusEl.className = 'status error';
+      }
+    }
+    
+    loadBtn.addEventListener('click', async () => {
+      try {
+        loadBtn.disabled = true;
+        test2.textContent = '⏳ Loading knowledge...';
+        
+        await client.loadKnowledge(sampleKnowledge);
+        
+        const status = await client.getStatus();
+        test2.innerHTML = `✅ <strong>SUCCESS:</strong> Loaded ${status.knowledgeBase.chunkCount} chunks`;
+        
+        // Update package info
+        packageInfo.innerHTML = `
+          <pre>${JSON.stringify({
+            initialized: status.initialized,
+            embeddings: status.embeddings,
+            chunks: status.knowledgeBase.chunkCount,
+            llmAvailable: status.llm.available
+          }, null, 2)}</pre>
+        `;
+        
+        // Enable test 3
+        queryInput.disabled = false;
+        askBtn.disabled = false;
+        queryInput.focus();
+        
+      } catch (error) {
+        console.error('Load failed:', error);
+        test2.innerHTML = `❌ <strong>FAILED:</strong> ${error.message}`;
+        loadBtn.disabled = false;
+      }
+    });
+    
+    async function handleQuery() {
+      const query = queryInput.value.trim();
+      if (!query) return;
+      
+      try {
+        askBtn.disabled = true;
+        queryInput.disabled = true;
+        test3.innerHTML = '<div class="result">⏳ Processing query...</div>';
+        
+        const answer = await client.ask(query);
+        
+        test3.innerHTML = `
+          <div class="result">
+            <strong>Question:</strong> ${query}<br><br>
+            <strong>Answer:</strong> ${answer.text}<br><br>
+            <strong>Confidence:</strong> ${(answer.confidence * 100).toFixed(1)}%<br>
+            <strong>Sources:</strong> ${answer.sources?.length || 0}<br>
+            <strong>Time:</strong> ${answer.timing?.total}ms
+            ${answer.topSource ? `<br><strong>Top Source:</strong> ${answer.topSource.title}` : ''}
+            <pre>${JSON.stringify(answer, null, 2)}</pre>
+          </div>
+        `;
+        
+        queryInput.value = '';
+        
+      } catch (error) {
+        console.error('Query failed:', error);
+        test3.innerHTML = `<div class="result">❌ <strong>FAILED:</strong> ${error.message}</div>`;
+      } finally {
+        askBtn.disabled = false;
+        queryInput.disabled = false;
+        queryInput.focus();
+      }
+    }
+    
+    askBtn.addEventListener('click', handleQuery);
+    queryInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter' && !queryInput.disabled) {
+        handleQuery();
+      }
+    });
+    
+    // Start tests
+    runTests();
+  </script>
+</body>
+</html>
