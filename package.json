@@ -1,6 +1,6 @@
 {
   "name": "dhiya-npm",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Client-side RAG (Retrieval-Augmented Generation) framework for browsers. Zero server dependency, multi-tier model fallback, production-ready.",
   "type": "module",
   "main": "./dist/index.js",
