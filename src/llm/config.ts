@@ -1,38 +1,25 @@
-/**
- * LLM Configuration
- */
+import { ChromeAIOptions, TransformersOptions } from '../core/types';
 
 /**
- * Transformers.js configuration (using DistilGPT-2)
+ * Default Transformers.js options
  */
-export const TRANSFORMERS_CONFIG = {
-  // Model to use (DistilGPT-2 - smaller, faster)
+export const DEFAULT_TRANSFORMERS_OPTIONS: TransformersOptions = {
   model: 'Xenova/distilgpt2',
-  
-  // System prompt
   systemPrompt: `You are a helpful AI assistant. Provide concise, accurate answers based on the given context. Be direct and helpful.`,
-  
-  // Environment settings
-  allowLocalModels: false,
-  useBrowserCache: true
-};
-
-/**
- * Generation parameters
- */
-export const GENERATION_CONFIG = {
   maxTokens: 150,
   temperature: 0.7,
   topK: 50,
   topP: 0.9,
   repetitionPenalty: 1.2,
-  doSample: true
+  doSample: true,
+  allowLocalModels: false,
+  useBrowserCache: true
 };
 
 /**
- * Chrome AI configuration
+ * Default Chrome AI options
  */
-export const CHROME_AI_CONFIG = {
+export const DEFAULT_CHROME_AI_OPTIONS: ChromeAIOptions = {
   systemPrompt: `You are a helpful AI assistant. Provide clear, concise answers based on the context provided. If you don't know something, say so. Be professional and friendly.`,
   temperature: 0.7,
   topK: 3

@@ -4,8 +4,8 @@
  */
 
 import { ILLMProvider, LLMGenerateOptions } from './base';
-import { LLMProvider } from '../core/types';
-import { CHROME_AI_CONFIG } from './config';
+import { ChromeAIOptions, LLMProvider } from '../core/types';
+import { DEFAULT_CHROME_AI_OPTIONS } from './config';
 
 // Chrome AI types
 declare global {
@@ -34,6 +34,19 @@ declare global {
 export class ChromeAIProvider implements ILLMProvider {
   name = LLMProvider.CHROME_AI;
   private session: any = null;
+  private options: ChromeAIOptions;
+
+  constructor(options: ChromeAIOptions = DEFAULT_CHROME_AI_OPTIONS) {
+    this.options = { ...options };
+  }
+
+  setOptions(options: Partial<ChromeAIOptions>): void {
+    this.options = { ...this.options, ...options };
+    if (this.session) {
+      this.session.destroy();
+      this.session = null;
+    }
+  }
 
   async isAvailable(): Promise<boolean> {
     try {
@@ -67,12 +80,12 @@ export class ChromeAIProvider implements ILLMProvider {
 
       // Create session
       this.session = await window.ai.languageModel.create({
-        temperature: CHROME_AI_CONFIG.temperature,
-        topK: CHROME_AI_CONFIG.topK,
+        temperature: this.options.temperature,
+        topK: this.options.topK,
         initialPrompts: [
           {
             role: 'system',
-            content: CHROME_AI_CONFIG.systemPrompt
+            content: this.options.systemPrompt
           }
         ]
       });
@@ -84,6 +97,10 @@ export class ChromeAIProvider implements ILLMProvider {
   }
 
   async generate(prompt: string, options?: LLMGenerateOptions): Promise<string> {
+    if (options?.systemPrompt && options.systemPrompt !== this.options.systemPrompt) {
+      this.setOptions({ systemPrompt: options.systemPrompt });
+    }
+
     if (!this.session) {
       await this.initialize();
     }

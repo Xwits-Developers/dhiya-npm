@@ -16,7 +16,9 @@ export type {
   Source,
   Chunk,
   ProgressEvent,
-  LLMStatus
+  LLMStatus,
+  ChromeAIOptions,
+  TransformersOptions
 } from './core/types';
 
 export {
@@ -25,6 +27,18 @@ export {
   EmbeddingModel,
   DeviceType
 } from './core/types';
+
+export type { LLMManagerOptions } from './llm/llm-manager';
+
+export {
+  DEFAULT_CONFIG,
+  TRANSFORMERS_MODELS
+} from './core/config';
+
+export {
+  DEFAULT_CHROME_AI_OPTIONS,
+  DEFAULT_TRANSFORMERS_OPTIONS
+} from './llm/config';
 
 // Export LLM utilities
 export { QueryType } from './llm/query-classifier';

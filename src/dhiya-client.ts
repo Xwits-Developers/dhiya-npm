@@ -38,7 +38,12 @@ export class DhiyaClient {
     
     // Initialize LLM if enabled
     if (this.config.enableLLM) {
-      this.llm = new LLMManager(this.config.preferredProvider);
+      this.llm = new LLMManager({
+        preferredProvider: this.config.preferredProvider,
+        chromeAIOptions: { ...this.config.chromeAIOptions },
+        transformersOptions: { ...this.config.transformersOptions },
+        fallbackOrder: [...this.config.llmFallbackOrder]
+      });
     }
   }
   

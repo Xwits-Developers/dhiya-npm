@@ -136,6 +136,25 @@ export interface LLMGenerateOptions {
   contextChunks?: string[];
 }
 
+export interface ChromeAIOptions {
+  systemPrompt: string;
+  temperature: number;
+  topK: number;
+}
+
+export interface TransformersOptions {
+  model: string;
+  systemPrompt: string;
+  maxTokens: number;
+  temperature: number;
+  topK: number;
+  topP: number;
+  repetitionPenalty: number;
+  doSample: boolean;
+  allowLocalModels: boolean;
+  useBrowserCache: boolean;
+}
+
 // ============================================================================
 // Configuration Types
 // ============================================================================
@@ -164,6 +183,9 @@ export interface DhiyaConfig {
   enableLLM?: boolean;
   preferredProvider?: LLMProvider;
   transformersModel?: string;
+  transformersOptions?: Partial<TransformersOptions>;
+  chromeAIOptions?: Partial<ChromeAIOptions>;
+  llmFallbackOrder?: LLMProvider[];
   fallbackToRAGOnly?: boolean;
   
   // Hallucination controls

@@ -2,7 +2,8 @@
  * Default configuration for dhiya-npm
  */
 
-import { DhiyaConfig, LLMProvider } from './types';
+import { ChromeAIOptions, DhiyaConfig, LLMProvider, TransformersOptions } from './types';
+import { DEFAULT_CHROME_AI_OPTIONS, DEFAULT_TRANSFORMERS_OPTIONS } from '../llm/config';
 
 /**
  * Default configuration values
@@ -30,7 +31,10 @@ export const DEFAULT_CONFIG: Required<Omit<DhiyaConfig, 'onProgress' | 'onError'
   // LLM
   enableLLM: true,
   preferredProvider: LLMProvider.CHROME_AI,
-  transformersModel: 'Xenova/gpt2',
+  transformersModel: DEFAULT_TRANSFORMERS_OPTIONS.model,
+  transformersOptions: { ...DEFAULT_TRANSFORMERS_OPTIONS },
+  chromeAIOptions: { ...DEFAULT_CHROME_AI_OPTIONS },
+  llmFallbackOrder: [LLMProvider.CHROME_AI, LLMProvider.TRANSFORMERS],
   fallbackToRAGOnly: true,
   
   // Hallucination controls defaults
@@ -91,30 +95,6 @@ export const TRANSFORMERS_MODELS = {
     description: 'Best balance (if available)'
   }
 } as const;
-
-/**
- * Generation parameters for Transformers.js
- */
-export const GENERATION_CONFIG = {
-  maxTokens: 150,
-  temperature: 0.7,
-  topK: 50,
-  topP: 0.9,
-  repetitionPenalty: 1.1,
-  doSample: true
-};
-
-/**
- * Chrome AI configuration
- */
-export const CHROME_AI_CONFIG = {
-  systemPrompt: `You are a helpful AI assistant. Be concise, accurate, and professional.
-Answer based on the provided context when available.
-Say "I don't know" rather than guessing.
-Keep responses under 150 words unless more detail is needed.`,
-  temperature: 0.7,
-  topK: 3
-};
 
 /**
  * Chunking configuration
@@ -207,6 +187,30 @@ export function mergeConfig(userConfig?: DhiyaConfig): Required<DhiyaConfig> {
     ...DEFAULT_CONFIG,
     ...userConfig
   };
+
+  const transformersOptions: TransformersOptions = {
+    ...DEFAULT_TRANSFORMERS_OPTIONS,
+    ...(userConfig?.transformersOptions || {})
+  };
+  if (userConfig?.transformersModel) {
+    transformersOptions.model = userConfig.transformersModel;
+  }
+  if (userConfig?.transformersOptions?.model) {
+    transformersOptions.model = userConfig.transformersOptions.model;
+  }
+  merged.transformersOptions = transformersOptions;
+  merged.transformersModel = transformersOptions.model;
+
+  const chromeAIOptions: ChromeAIOptions = {
+    ...DEFAULT_CHROME_AI_OPTIONS,
+    ...(userConfig?.chromeAIOptions || {})
+  };
+  merged.chromeAIOptions = chromeAIOptions;
+
+  merged.llmFallbackOrder = (userConfig?.llmFallbackOrder?.length
+    ? userConfig.llmFallbackOrder
+    : DEFAULT_CONFIG.llmFallbackOrder
+  ).slice();
   
   // Validate and constrain values
   merged.chunkSize = Math.max(

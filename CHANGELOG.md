@@ -5,14 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.1] - 2025-10-14
+## [1.0.2] - 2025-10-15
+
+### Added
+- Comprehensive README refresh with “client-side RAG” focused messaging, benchmarks, CDN usage, and API reference
+- CommonJS build output alongside ESM (`dist-cjs`) plus dual exports for Node compatibility
+- SEO-oriented keyword set and badge lineup to improve npm ranking
+- Funding metadata and side-effect hints for better ecosystem scoring
 
 ### Changed
-- Updated README with improved documentation
-- Enhanced package description and usage examples
+- Build pipeline now produces ESM, CJS, and declaration outputs in a single `npm run build`
+- README front-loads install + quickstart and weaves in key search phrases (“browser rag”, “offline rag”, “rag framework”)
 
 ### Fixed
-- Minor documentation improvements
+- Clean script now clears both `dist` and `dist-cjs` directories to prevent stale builds
+
+## [1.0.1] - 2025-10-15
+
+### Added
+- Runtime-configurable LLM options for Chrome AI and Transformers.js (prompts, temperatures, token limits, caching)
+- Ability to define custom LLM fallback order directly in client configuration
+- Public exports for default LLM option presets and curated Transformers model list
+- Enhanced documentation covering provider selection and configuration tips
+
+### Changed
+- DhiyaClient now forwards deep LLM configuration into the LLM manager at initialization
+- Transformers provider dynamically reports the active model during load/cleanup for clearer debugging
+- Updated dev toolchain (Vitest/ui 3.2.4, happy-dom 20.0.1) to align with latest ecosystem releases
+
+### Fixed
+- TypeScript merging logic for LLM options now preserves strong types when overriding defaults
+- Resolved npm cache warning in CI by tracking `package-lock.json`
 
 ## [1.0.0] - 2025-10-14
 
@@ -70,5 +93,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Safari 14+
 - Any modern browser with WASM and IndexedDB support
 
+[1.0.2]: https://github.com/Xwits-Developers/dhiya-npm/releases/tag/v1.0.2
 [1.0.1]: https://github.com/Xwits-Developers/dhiya-npm/releases/tag/v1.0.1
 [1.0.0]: https://github.com/Xwits-Developers/dhiya-npm/releases/tag/v1.0.0

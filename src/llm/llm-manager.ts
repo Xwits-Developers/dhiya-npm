@@ -5,22 +5,60 @@
 import { ILLMProvider } from './base';
 import { ChromeAIProvider } from './chrome-ai-provider';
 import { TransformersProvider } from './transformers-provider';
-import { LLMProvider, LLMStatus } from '../core/types';
-import { LLM_TIMEOUTS } from './config';
+import { ChromeAIOptions, LLMProvider, LLMStatus, TransformersOptions } from '../core/types';
+import { DEFAULT_CHROME_AI_OPTIONS, DEFAULT_TRANSFORMERS_OPTIONS, LLM_TIMEOUTS } from './config';
+
+export interface LLMManagerOptions {
+  preferredProvider?: LLMProvider;
+  chromeAIOptions?: Partial<ChromeAIOptions>;
+  transformersOptions?: Partial<TransformersOptions>;
+  fallbackOrder?: LLMProvider[];
+}
 
 export class LLMManager {
   private providers: Map<LLMProvider, ILLMProvider> = new Map();
   private activeProvider: LLMProvider | null = null;
   private preferredProvider: LLMProvider;
+  private chromeAIOptions: ChromeAIOptions;
+  private transformersOptions: TransformersOptions;
+  private fallbackOrder: LLMProvider[];
+
   private initPromise: Promise<void> | null = null;
   private isInitializing = false;
 
-  constructor(preferredProvider: LLMProvider = LLMProvider.CHROME_AI) {
-    this.preferredProvider = preferredProvider;
-    
-    // Register providers
-    this.providers.set(LLMProvider.CHROME_AI, new ChromeAIProvider());
-    this.providers.set(LLMProvider.TRANSFORMERS, new TransformersProvider());
+  private static readonly REGISTERED_PROVIDERS: LLMProvider[] = [
+    LLMProvider.CHROME_AI,
+    LLMProvider.TRANSFORMERS
+  ];
+
+  constructor(options: LLMProvider | LLMManagerOptions = LLMProvider.CHROME_AI) {
+    if (typeof options === 'string') {
+      this.preferredProvider = options;
+      this.chromeAIOptions = { ...DEFAULT_CHROME_AI_OPTIONS };
+      this.transformersOptions = { ...DEFAULT_TRANSFORMERS_OPTIONS };
+      this.fallbackOrder = this.buildFallbackOrder();
+    } else {
+      this.preferredProvider = options.preferredProvider ?? LLMProvider.CHROME_AI;
+      this.chromeAIOptions = { ...DEFAULT_CHROME_AI_OPTIONS, ...(options.chromeAIOptions || {}) };
+      this.transformersOptions = {
+        ...DEFAULT_TRANSFORMERS_OPTIONS,
+        ...(options.transformersOptions || {})
+      };
+      this.fallbackOrder = this.buildFallbackOrder(options.fallbackOrder);
+    }
+
+    if (!this.fallbackOrder.length) {
+      this.preferredProvider = LLMProvider.NONE;
+    } else if (
+      this.preferredProvider === LLMProvider.NONE ||
+      !this.fallbackOrder.includes(this.preferredProvider)
+    ) {
+      this.preferredProvider = this.fallbackOrder[0];
+    }
+
+    // Register providers with options
+    this.providers.set(LLMProvider.CHROME_AI, new ChromeAIProvider(this.chromeAIOptions));
+    this.providers.set(LLMProvider.TRANSFORMERS, new TransformersProvider(this.transformersOptions));
   }
 
   /**
@@ -46,16 +84,7 @@ export class LLMManager {
   }
 
   private async _tryInitialize(): Promise<void> {
-    // Try preferred provider first
-    if (await this._tryProvider(this.preferredProvider)) {
-      return;
-    }
-
-    // Try other providers
-    const otherProviders = Array.from(this.providers.keys())
-      .filter(p => p !== this.preferredProvider && p !== LLMProvider.NONE);
-
-    for (const providerType of otherProviders) {
+    for (const providerType of this.fallbackOrder) {
       if (await this._tryProvider(providerType)) {
         return;
       }
@@ -159,6 +188,44 @@ export class LLMManager {
     this.activeProvider = null;
   }
 
+  setPreferredProvider(provider: LLMProvider): void {
+    this.preferredProvider = provider;
+    this.fallbackOrder = this.buildFallbackOrder([provider, ...this.fallbackOrder]);
+    this.activeProvider = null;
+  }
+
+  setFallbackOrder(order: LLMProvider[]): void {
+    this.fallbackOrder = this.buildFallbackOrder(order);
+    if (!this.fallbackOrder.length) {
+      this.preferredProvider = LLMProvider.NONE;
+    } else if (!this.fallbackOrder.includes(this.preferredProvider)) {
+      this.preferredProvider = this.fallbackOrder[0];
+    }
+    this.activeProvider = null;
+  }
+
+  updateTransformersOptions(options: Partial<TransformersOptions>): void {
+    this.transformersOptions = { ...this.transformersOptions, ...options };
+    const provider = this.providers.get(LLMProvider.TRANSFORMERS);
+    if (provider instanceof TransformersProvider) {
+      provider.setOptions(this.transformersOptions);
+    }
+    if (this.activeProvider === LLMProvider.TRANSFORMERS) {
+      this.activeProvider = null;
+    }
+  }
+
+  updateChromeAIOptions(options: Partial<ChromeAIOptions>): void {
+    this.chromeAIOptions = { ...this.chromeAIOptions, ...options };
+    const provider = this.providers.get(LLMProvider.CHROME_AI);
+    if (provider instanceof ChromeAIProvider) {
+      provider.setOptions(this.chromeAIOptions);
+    }
+    if (this.activeProvider === LLMProvider.CHROME_AI) {
+      this.activeProvider = null;
+    }
+  }
+
   /**
    * Helper: Run promise with timeout
    */
@@ -198,14 +265,36 @@ export class LLMManager {
         return LLM_TIMEOUTS.fallback;
     }
   }
+
+  private buildFallbackOrder(custom?: LLMProvider[]): LLMProvider[] {
+    const base = custom?.length
+      ? custom
+      : [
+          this.preferredProvider,
+          ...LLMManager.REGISTERED_PROVIDERS.filter(p => p !== this.preferredProvider)
+        ];
+
+    const seen = new Set<LLMProvider>();
+    const result: LLMProvider[] = [];
+
+    for (const provider of base) {
+      if (provider === LLMProvider.NONE) continue;
+      if (!LLMManager.REGISTERED_PROVIDERS.includes(provider)) continue;
+      if (seen.has(provider)) continue;
+      seen.add(provider);
+      result.push(provider);
+    }
+
+    return result;
+  }
 }
 
 // Singleton instance (optional)
 let llmManagerInstance: LLMManager | null = null;
 
-export function getLLMManager(preferredProvider?: LLMProvider): LLMManager {
+export function getLLMManager(options?: LLMProvider | LLMManagerOptions): LLMManager {
   if (!llmManagerInstance) {
-    llmManagerInstance = new LLMManager(preferredProvider);
+    llmManagerInstance = new LLMManager(options);
   }
   return llmManagerInstance;
 }

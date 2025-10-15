@@ -1,11 +1,11 @@
 /**
- * Transformers.js Provider using DistilGPT-2
+ * Transformers.js Provider (configurable model)
  * Runs locally in browser via WebGPU/WASM
  */
 
 import { ILLMProvider, LLMGenerateOptions } from './base';
-import { LLMProvider } from '../core/types';
-import { TRANSFORMERS_CONFIG, GENERATION_CONFIG } from './config';
+import { LLMProvider, TransformersOptions } from '../core/types';
+import { DEFAULT_TRANSFORMERS_OPTIONS } from './config';
 
 export class TransformersProvider implements ILLMProvider {
   name = LLMProvider.TRANSFORMERS;
@@ -13,6 +13,17 @@ export class TransformersProvider implements ILLMProvider {
   private isLoading = false;
   private isLoaded = false;
   private loadPromise: Promise<void> | null = null;
+  private options: TransformersOptions;
+
+  constructor(options: TransformersOptions = DEFAULT_TRANSFORMERS_OPTIONS) {
+    this.options = { ...options };
+  }
+
+  setOptions(options: Partial<TransformersOptions>): void {
+    this.options = { ...this.options, ...options };
+    this.isLoaded = false;
+    this.generator = null;
+  }
 
   async isAvailable(): Promise<boolean> {
     try {
@@ -48,15 +59,15 @@ export class TransformersProvider implements ILLMProvider {
   }
 
   private async _loadModel(): Promise<void> {
-    console.log('📥 Loading Transformers.js model (DistilGPT-2)...');
+    console.log(`📥 Loading Transformers.js model (${this.options.model})...`);
 
     try {
       // Dynamic import to avoid bundling
       const { pipeline, env } = await import('@xenova/transformers');
 
       // Configure environment
-      env.allowLocalModels = TRANSFORMERS_CONFIG.allowLocalModels;
-      env.useBrowserCache = TRANSFORMERS_CONFIG.useBrowserCache;
+      env.allowLocalModels = this.options.allowLocalModels;
+      env.useBrowserCache = this.options.useBrowserCache;
 
       // Reduce ONNX runtime verbosity
       try {
@@ -74,7 +85,7 @@ export class TransformersProvider implements ILLMProvider {
       // Load model
       this.generator = await pipeline(
         'text-generation',
-        TRANSFORMERS_CONFIG.model,
+        this.options.model,
         {
           quantized: true
           // Note: device selection handled automatically by transformers.js
@@ -82,7 +93,7 @@ export class TransformersProvider implements ILLMProvider {
       );
 
       this.isLoaded = true;
-      console.log('✅ Transformers.js (DistilGPT-2) loaded successfully');
+      console.log(`✅ Transformers.js (${this.options.model}) loaded successfully`);
     } catch (error) {
       this.isLoaded = false;
       throw new Error(`Failed to load Transformers.js: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -95,7 +106,7 @@ export class TransformersProvider implements ILLMProvider {
     }
 
     try {
-      const systemPrompt = options?.systemPrompt || TRANSFORMERS_CONFIG.systemPrompt;
+      const systemPrompt = options?.systemPrompt || this.options.systemPrompt;
 
       // Format prompt for GPT-2 (no chat template)
       const fullPrompt = options?.context
@@ -104,12 +115,12 @@ export class TransformersProvider implements ILLMProvider {
 
       // Generate
       const result = await this.generator(fullPrompt, {
-        max_new_tokens: options?.maxTokens || GENERATION_CONFIG.maxTokens,
-        temperature: options?.temperature || GENERATION_CONFIG.temperature,
-        top_k: GENERATION_CONFIG.topK,
-        top_p: GENERATION_CONFIG.topP,
-        repetition_penalty: GENERATION_CONFIG.repetitionPenalty,
-        do_sample: GENERATION_CONFIG.doSample
+        max_new_tokens: options?.maxTokens || this.options.maxTokens,
+        temperature: options?.temperature || this.options.temperature,
+        top_k: this.options.topK,
+        top_p: this.options.topP,
+        repetition_penalty: this.options.repetitionPenalty,
+        do_sample: this.options.doSample
       });
 
       // Extract generated text
@@ -148,6 +159,6 @@ export class TransformersProvider implements ILLMProvider {
   async cleanup(): Promise<void> {
     this.generator = null;
     this.isLoaded = false;
-    console.log('🧹 Transformers.js cleaned up');
+    console.log(`🧹 Transformers.js (${this.options.model}) cleaned up`);
   }
 }
