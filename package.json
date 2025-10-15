@@ -1,6 +1,6 @@
 {
   "name": "dhiya-npm",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Production-ready client-side RAG framework for browsers: WebGPU embeddings, vector search, offline store, privacy-first.",
   "type": "module",
   "main": "./dist/index.js",
