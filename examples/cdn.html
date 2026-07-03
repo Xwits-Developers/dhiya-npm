@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dhiya — zero-build CDN integration</title>
+</head>
+<body>
+  <h1>Dhiya chat widget — no bundler, no build step</h1>
+  <p>This page adds a full client-side RAG chatbot with one custom element
+     and one module import. Serve it from any static host (opening the file
+     directly with file:// will not work — browsers require http(s) for
+     module imports and IndexedDB).</p>
+
+  <!-- 1. The widget tag. Knowledge can be inline... -->
+  <dhiya-chat title="Acme Help" accent="#0f766e" welcome="Hi! Ask me about Acme.">
+    <script type="text/knowledge">
+      Acme gadgets carry a two-year warranty covering manufacturing defects.
+      Accidental damage is not covered by the warranty.
+
+      Acme support is available 24/7 via chat. Refunds can be requested within
+      30 days of purchase for a full reimbursement.
+
+      Acme ships worldwide. Standard shipping takes 3-5 business days and
+      express shipping takes 1-2 business days.
+    </script>
+  </dhiya-chat>
+
+  <!-- 2. Load the widget module from a CDN that rewrites bare imports.
+       Pin the major version in production, e.g. dhiya-npm@2 -->
+  <script type="module">
+    import 'https://cdn.jsdelivr.net/npm/dhiya-npm@2/dist/widget/index.js/+esm';
+  </script>
+</body>
+</html>

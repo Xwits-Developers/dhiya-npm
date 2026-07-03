@@ -1,10 +1,9 @@
-# 🧠 Dhiya NPM
+# 🧠 Dhiya
 
-> Production-ready **client-side RAG client** for the browser — privacy-first, WebGPU-ready, offline-capable vector search with LLM fallbacks.
+> A **client-side RAG chatbot** for the browser. Embeddings, vector search, storage, and answer generation all run locally — no servers, no API keys, and user data never leaves the device.
 
 [![npm version](https://img.shields.io/npm/v/dhiya-npm.svg?style=flat-square)](https://www.npmjs.com/package/dhiya-npm)
 [![npm downloads](https://img.shields.io/npm/dm/dhiya-npm.svg?style=flat-square)](https://www.npmjs.com/package/dhiya-npm)
-[![bundle size](https://img.shields.io/bundlephobia/minzip/dhiya-npm.svg?style=flat-square)](https://bundlephobia.com/package/dhiya-npm)
 [![types](https://img.shields.io/badge/Types-Ready-blue.svg?style=flat-square)](https://www.typescriptlang.org/)
 [![license](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
@@ -12,136 +11,128 @@
 npm install dhiya-npm
 ```
 
-## ⚡ 30-Second “Hello RAG”
+## How it works
+
+1. **Ingest** — your text/JSON/URL content is chunked on paragraph and sentence boundaries.
+2. **Embed** — chunks are embedded locally with [Transformers.js](https://github.com/huggingface/transformers.js) (`all-MiniLM-L6-v2`, ~25 MB one-time download, cached by the browser). WebGPU is used when available, WASM otherwise.
+3. **Store** — chunks + vectors persist in IndexedDB, so the index survives reloads and works offline.
+4. **Answer** — questions are embedded, matched by cosine similarity, and answered by a **local LLM grounded in the retrieved chunks**, with token streaming. Without an LLM, Dhiya falls back to extractive answers.
+
+Two local LLM providers, tried in order:
+
+| Provider | What it is | Notes |
+|----------|------------|-------|
+| `chrome-ai` | Chrome's built-in Gemini Nano via the [Prompt API](https://developer.chrome.com/docs/ai/prompt-api) (`LanguageModel`) | Chrome 138+ on supported hardware; no extra download if the browser has the model |
+| `transformers` | An ONNX instruct model via Transformers.js (default `onnx-community/Qwen2.5-0.5B-Instruct`, ~350 MB q4, cached after first load) | Works in any modern browser; fastest with WebGPU |
+
+Set `enableLLM: false` for a lightweight, extractive-only setup (~25 MB total).
+
+## Quick start
 
 ```typescript
-import { DhiyaClient, LLMProvider } from 'dhiya-npm';
+import { DhiyaClient } from 'dhiya-npm';
 
-const client = new DhiyaClient({
-  preferredProvider: LLMProvider.CHROME_AI,
-  llmFallbackOrder: [LLMProvider.CHROME_AI, LLMProvider.TRANSFORMERS]
-});
-
+const client = new DhiyaClient();
 await client.initialize();
 
 await client.loadKnowledge({
-  type: 'array',
-  documentId: 'docs',
-  items: [
-    'Dhiya is a client-side RAG framework that runs entirely in the browser.',
-    'It ships WebGPU embeddings, offline vector search, and privacy-preserving LLM fallbacks.',
-    'Use it to power documentation chatbots, support widgets, and secure intranet Q&A.'
-  ]
+  type: 'text',
+  documentId: 'help',
+  content: `Our warranty covers manufacturing defects for two years.
+
+Refunds can be requested within 30 days of purchase.`
 });
 
-const answer = await client.ask('What makes Dhiya a privacy-first RAG client?');
-console.log(answer.text);
+// Streaming answer
+const answer = await client.ask('What does the warranty cover?', {
+  onToken: t => process.stdout.write(t) // or append to your UI
+});
+
+console.log(answer.text);        // grounded answer
+console.log(answer.sources);     // matched chunks with similarity scores
+console.log(answer.confidence);  // 0..1
 ```
 
-## 💡 Why Client-Side RAG?
+## Drop-in chat widget (no framework needed)
 
-- **Zero infrastructure** – ship a full RAG stack without servers or API keys.
-- **Privacy & compliance** – sensitive content never leaves the device.
-- **Offline RAG** – embeddings, index, and LLM fallbacks run without network.
-- **Instant feedback loops** – ship demos or production widgets that update immediately.
-
-## 🚀 Feature Highlights
-
-- **Client-side RAG framework** with WebGPU embeddings, WebAssembly fallback, and IndexedDB persistence.
-- **Browser RAG pipeline**: semantic chunking, vector search, and answer synthesis tuned for in-browser AI.
-- **Local LLM control**: Chrome AI (Gemini Nano) prioritized, Transformers.js fallback with configurable models, prompts, and temperatures.
-- **Offline vector store** with automatic cache eviction and chunk manifests for delta updates.
-- **Privacy-first RAG** safeguards: strict RAG mode, similarity gating, chunk-count checks, context caps.
-- **LangChain.js & WebLLM friendly** utilities that slot into existing workflows.
-
-## 🧱 Architecture at a Glance
-
-1. **Chunker** → Splits knowledge sources into retrieval-friendly segments.
-2. **Embeddings (WebGPU / WASM)** → Generates vectors locally via Transformers.js.
-3. **Vector Store (IndexedDB)** → Stores chunks + embeddings with TTL and manifest tracking.
-4. **Retriever** → Performs WebAssembly-accelerated cosine similarity searches.
-5. **Generator** → Optional LLM enhancer (Chrome AI → Transformers.js → RAG-only).
-6. **Answer Formatter** → Adds citations, confidence, and timing metadata.
-
-## 📚 API Reference
-
-| Method | Description | Key Options |
-|--------|-------------|-------------|
-| `constructor(config?: DhiyaConfig)` | Create a client with defaults merged in. | Configure `client-side rag` levers such as `preferredProvider`, `transformersOptions`, `chromeAIOptions`, `strictRAG`. |
-| `initialize()` | Loads storage, embeddings, cached chunks, and warms up LLMs asynchronously. | Emits progress callbacks via `onProgress`. |
-| `loadKnowledge(source)` | Ingest JSON, text, URL, or string arrays. Automatically chunks, embeds, and stores vectors. | Supports incremental updates via document manifests. |
-| `ask(query, options?)` | Runs retrieval, optionally enhances with LLM, and formats a privacy-preserving answer. | Control `topK`, `enableLLM`, `conversationHistory`, `timeout`. |
-| `getStatus()` | Snapshot of embedding, storage, knowledge base, and LLM state. | Useful for dashboards and guardrails. |
-| `clear()` | Removes all persisted chunks and manifests. | Keeps embeddings and configuration intact. |
-| `destroy()` | Releases resources, closes storage, and cleans up LLM sessions. | Call on app teardown. |
-
-Additional helpers are exported to integrate with LangChain.js retrievers, custom similarity scoring, and device capability checks.
-
-## 🌐 Browser & GPU Support
-
-- ✔️ Chrome / Edge (WebGPU + Chrome AI Gemini Nano)
-- ✔️ Firefox (WASM embeddings + IndexedDB vector search)
-- ✔️ Safari 15+ (WASM fallback, storage quotas handled internally)
-- GPU acceleration automatically falls back to WASM or CPU; provide `device: 'webgpu' | 'wasm' | 'cpu'` for deterministic behaviour.
-
-## 📊 Benchmarks _(MacBook Pro M2, Chrome 129)_
-
-| Operation | WebGPU | WASM |
-|-----------|--------|------|
-| Initial embedding throughput | ~180 chunks/sec | ~45 chunks/sec |
-| Query retrieval latency (top-5) | 18 ms avg | 42 ms avg |
-| LLM enhancement (Chrome AI) | ≤ 2 s median | — |
-| IndexedDB persistence | 1,200 chunks/sec write | 1,200 chunks/sec write |
-
-Numbers are indicative; tune chunk size, overlap, and batching to match your domain.
-
-## 🧪 Examples & Templates
-
-- **Vite browser RAG** – `/example` (run `npm run example`) showcases live status indicators and a docs-focused chat UI.
-- **React + Vite** – `/examples/react-vite` demonstrates a lightweight SPA that depends on `dhiya-npm`. Install and run with `npm install && npm run dev`.
-- **Next.js App Router** – `/examples/nextjs-app` renders a client component that loads Dhiya in the browser. Start with `npm install && npm run dev`.
-- **CDN / Vanilla JS demo** – embed in a static page with `<script type="module">`.
-
-Feel free to add more dependents (SvelteKit, Astro, Electron). Every published example improves how “rag client” searches discover Dhiya.
-
-## ☁️ CDN Usage (jsDelivr)
+The `dhiya-npm/widget` entry registers a `<dhiya-chat>` custom element — a complete floating chat UI:
 
 ```html
+<dhiya-chat title="Acme Help" accent="#0f766e" welcome="Hi! Ask me anything.">
+  <script type="text/knowledge">
+    Paste your docs, FAQ, or policies here.
+  </script>
+</dhiya-chat>
+
 <script type="module">
-  import { DhiyaClient, LLMProvider } from 'https://cdn.jsdelivr.net/npm/dhiya-npm/dist/index.js';
-
-  const client = new DhiyaClient({
-    enableLLM: false, // Pure browser RAG without LLM
-    device: 'auto'
-  });
-
-  await client.initialize();
-  await client.loadKnowledge({
-    type: 'text',
-    documentId: 'policy',
-    content: 'Our privacy-preserving RAG client keeps all data on device.'
-  });
-
-  const { text } = await client.ask('Summarize the policy in one sentence');
-  console.log(text);
+  import 'https://cdn.jsdelivr.net/npm/dhiya-npm@2/dist/widget/index.js/+esm';
 </script>
 ```
 
-Use `unpkg` or pin versions with `@1.x` for stable builds.
+Widget attributes: `title`, `placeholder`, `welcome`, `accent` (CSS color), `position="left"`, `inline` (render in-place instead of floating), `kb-url` (fetch knowledge from a text/JSON URL), `db-name`, `no-llm`, `hide-sources`.
 
-## 🔗 Compatibility Notes
+With a bundler, `import 'dhiya-npm/widget'` and either use attributes or hand the element a configured client: `document.querySelector('dhiya-chat').client = myClient`.
 
-- Works alongside **LangChain.js** via custom retriever adapters using exported similarity helpers.
-- Plays nicely with **WebLLM**, **Transformers.js**, and other local LLM runtimes — swap in your own generator when needed.
-- Designed for “browser rag”, “offline rag”, and “privacy rag” workflows where sockets and servers are not an option.
+## API
 
-## 🗺️ Roadmap & Contributing
+| Method | Description |
+|--------|-------------|
+| `new DhiyaClient(config?)` | Create a client (see configuration below). |
+| `initialize()` | Open storage and load the embedding model. Must be called first. Safe to call repeatedly. |
+| `loadKnowledge(source)` | Ingest `{type:'text'|'json'|'url'|'array', ...}`. Re-loading the same `documentId` with changed content replaces it and invalidates cached answers. Unchanged content is skipped. |
+| `ask(query, options?)` | Retrieval + grounded answer. Options: `topK`, `enableLLM`, `timeout`, `conversationHistory`, `onToken` (streaming), `skipCache`. |
+| `search(query, options?)` | Raw scored chunks (`{chunk, similarity}[]`) without answer synthesis. |
+| `getStatus()` | Embedding/LLM/storage/knowledge-base state — useful for loading UIs. |
+| `removeDocument(docId)` | Remove one document and its chunks. |
+| `clear()` | Wipe all knowledge and cached answers. |
+| `destroy()` | Release models, close storage. |
 
-- ✅ Current focus: better LangChain.js adapters, React hooks, and WASM-optimized reranking.
-- 🧭 Upcoming: hybrid reranker, streaming answer mode, improved telemetry hooks, additional demo templates.
+### Key configuration
 
-Want to help? Fork the repo, run `npm run build && npm test -- --run`, and open a pull request. Discussions and issues are tracked on GitHub.
+```typescript
+const client = new DhiyaClient({
+  // storage
+  dbName: 'dhiya-kb',
+  cacheTTL: 24 * 60 * 60 * 1000,   // answer cache lifetime
+  // models
+  embeddingModel: 'english',        // or 'multilingual' (50+ languages, ~120 MB)
+  device: 'auto',                   // 'webgpu' | 'wasm' | 'auto'
+  enableLLM: true,
+  transformersModel: 'onnx-community/Qwen2.5-0.5B-Instruct',
+  llmFallbackOrder: ['chrome-ai', 'transformers'],
+  // retrieval & answers
+  chunkSize: 900,
+  topK: 5,
+  similarityThreshold: 0.25,
+  minLLMSimilarity: 0.3,            // below this, skip the LLM (avoids hallucination)
+  noAnswerMessage: "I don't have enough information in my knowledge base to answer that.",
+  singleAnswerMode: false,          // true = short focused snippet, no LLM
+  // hooks
+  debug: false,
+  onProgress: e => console.log(e.message, e.progress)
+});
+```
 
-## 📜 License
+`TRANSFORMERS_MODELS` exports a few known-good generation models with size/quality notes.
 
-Dhiya is released under the [MIT License](LICENSE). Use it to build privacy-preserving, in-browser RAG applications with confidence.
+## Browser support
+
+- **Chrome / Edge** — WebGPU embeddings + optional Chrome built-in AI.
+- **Firefox / Safari 16+** — WASM embeddings; LLM answers via Transformers.js.
+- Requires IndexedDB, so Dhiya runs **in the browser only**. In SSR frameworks (Next.js etc.) create the client inside a client component / `useEffect`; importing the package on the server is safe (`initialize()` throws a clear error there).
+- Model files are fetched from the Hugging Face Hub on first use and cached by the browser. For fully offline or air-gapped deployments, self-host the models and point Transformers.js at them via `transformersOptions`.
+
+## Honest limitations
+
+- The default 0.5B-parameter local model is small: grounded answers are good, but it is not GPT-4. Swap in a larger model (e.g. `onnx-community/Llama-3.2-1B-Instruct`) where hardware allows.
+- First-time model downloads take bandwidth (~25 MB embeddings; ~350 MB default LLM). Use `enableLLM: false` or `no-llm` if that's too heavy for your users.
+- Retrieval is exact cosine search over all chunks — great up to roughly 10k chunks, not built for millions.
+
+## Examples
+
+- [`examples/vite-demo`](examples/vite-demo) — full API walkthrough with streaming chat and the widget.
+- [`examples/cdn.html`](examples/cdn.html) — zero-build script-tag integration.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

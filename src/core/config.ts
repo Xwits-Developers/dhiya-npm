@@ -2,8 +2,8 @@
  * Default configuration for dhiya-npm
  */
 
-import { ChromeAIOptions, DhiyaConfig, LLMProvider, TransformersOptions } from './types';
-import { DEFAULT_CHROME_AI_OPTIONS, DEFAULT_TRANSFORMERS_OPTIONS } from '../llm/config';
+import { ChromeAIOptions, DhiyaConfig, LLMProvider, TransformersOptions } from './types.js';
+import { DEFAULT_CHROME_AI_OPTIONS, DEFAULT_TRANSFORMERS_OPTIONS } from '../llm/config.js';
 
 /**
  * Default configuration values
@@ -13,21 +13,21 @@ export const DEFAULT_CONFIG: Required<Omit<DhiyaConfig, 'onProgress' | 'onError'
   dbName: 'dhiya-kb',
   cacheTTL: 24 * 60 * 60 * 1000, // 24 hours
   maxCacheSize: 100,
-  
+
   // Embedding
   embeddingModel: 'english',
   device: 'auto',
-  
+
   // Chunking
   chunkSize: 900,
   chunkOverlap: 120,
-  
+
   // Retrieval
   topK: 5,
   similarityThreshold: 0.25,
   useDiversity: true,
   diversityThreshold: 0.95,
-  
+
   // LLM
   enableLLM: true,
   preferredProvider: LLMProvider.CHROME_AI,
@@ -35,18 +35,15 @@ export const DEFAULT_CONFIG: Required<Omit<DhiyaConfig, 'onProgress' | 'onError'
   transformersOptions: { ...DEFAULT_TRANSFORMERS_OPTIONS },
   chromeAIOptions: { ...DEFAULT_CHROME_AI_OPTIONS },
   llmFallbackOrder: [LLMProvider.CHROME_AI, LLMProvider.TRANSFORMERS],
-  fallbackToRAGOnly: true,
-  
-  // Hallucination controls defaults
-  strictRAG: true,
-  minLLMSimilarity: 0.55,
-  minChunksForLLM: 5,
-  maxContextChars: 1800,
-  
-  // Answer formatting
-  singleAnswerMode: true,
+
+  // Answer quality
+  minLLMSimilarity: 0.3,
+  maxContextChars: 4000,
+  singleAnswerMode: false,
   answerLengthLimit: 320,
-  
+  noAnswerMessage: "I don't have enough information in my knowledge base to answer that.",
+  disableQueryClassification: false,
+
   // Advanced
   debug: false
 };
@@ -59,40 +56,40 @@ export const EMBEDDING_MODELS = {
     name: 'Xenova/all-MiniLM-L6-v2',
     dimensions: 384,
     maxTokens: 512,
-    description: 'Fast, lightweight model for English text'
+    description: 'Fast, lightweight model for English text (~25 MB download)'
   },
   multilingual: {
     name: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
     dimensions: 384,
     maxTokens: 512,
-    description: 'Supports 50+ languages'
+    description: 'Supports 50+ languages (~120 MB download)'
   }
 } as const;
 
 /**
- * Transformers.js model configurations
+ * Known-good Transformers.js generation models
  */
 export const TRANSFORMERS_MODELS = {
-  'Xenova/gpt2': {
-    name: 'GPT-2',
-    size: '~500MB',
-    speed: 'medium',
+  'onnx-community/Qwen2.5-0.5B-Instruct': {
+    name: 'Qwen2.5 0.5B Instruct',
+    size: '~350MB (q4)',
+    speed: 'fast on WebGPU, usable on WASM',
     quality: 'good',
-    description: 'Reliable fallback model'
+    description: 'Default: small instruct model with solid grounded answers'
   },
-  'Xenova/distilgpt2': {
-    name: 'DistilGPT-2',
-    size: '~250MB',
+  'HuggingFaceTB/SmolLM2-360M-Instruct': {
+    name: 'SmolLM2 360M Instruct',
+    size: '~270MB (q4)',
     speed: 'fast',
     quality: 'moderate',
-    description: 'Smaller, faster variant'
+    description: 'Smaller alternative for constrained devices'
   },
-  'Xenova/Qwen2-0.5B-Instruct': {
-    name: 'Qwen2 0.5B',
-    size: '~150MB',
-    speed: 'fast',
-    quality: 'excellent',
-    description: 'Best balance (if available)'
+  'onnx-community/Llama-3.2-1B-Instruct': {
+    name: 'Llama 3.2 1B Instruct',
+    size: '~700MB (q4)',
+    speed: 'medium (WebGPU recommended)',
+    quality: 'best',
+    description: 'Higher quality when bandwidth and memory allow'
   }
 } as const;
 
@@ -100,16 +97,7 @@ export const TRANSFORMERS_MODELS = {
  * Chunking configuration
  */
 export const CHUNKING_CONFIG = {
-  // Sentence boundaries to prioritize
-  sentenceBoundaries: ['. ', '! ', '? ', '.\n', '!\n', '?\n'],
-  
-  // Paragraph boundaries
-  paragraphBoundaries: ['\n\n', '\n\n\n'],
-  
-  // Minimum chunk size (avoid tiny chunks)
   minChunkSize: 100,
-  
-  // Maximum chunk size
   maxChunkSize: 1500
 };
 
@@ -135,32 +123,23 @@ export const VALIDATION_CONSTRAINTS = {
  * Performance thresholds
  */
 export const PERFORMANCE_THRESHOLDS = {
-  // High similarity = instant response without LLM enhancement
+  // Above this similarity the extractive answer is trusted as-is
   highSimilarity: 0.75,
-  
-  // Medium similarity = try LLM with short timeout
   mediumSimilarity: 0.5,
-  
-  // Low similarity = longer LLM timeout or suggest rephrasing
   lowSimilarity: 0.25,
-  
-  // Timeout budgets (ms)
-  llmTimeoutHigh: 2000,
-  llmTimeoutMedium: 3000,
-  llmTimeoutLow: 5000
+
+  // Timeout budgets (ms) for LLM generation
+  llmTimeoutLow: 30000,
+  llmTimeoutMedium: 20000,
+  llmTimeoutHigh: 15000
 };
 
 /**
  * Storage limits
  */
 export const STORAGE_LIMITS = {
-  // Recommended max chunks in memory
   maxChunksInMemory: 10000,
-  
-  // Batch size for embedding
-  embeddingBatchSize: 10,
-  
-  // IndexedDB quota warning threshold (bytes)
+  embeddingBatchSize: 8,
   quotaWarningThreshold: 50 * 1024 * 1024 // 50MB
 };
 
@@ -171,6 +150,8 @@ export const ERROR_MESSAGES = {
   NOT_INITIALIZED: 'DhiyaClient not initialized. Call initialize() first.',
   EMBEDDING_FAILED: 'Failed to initialize embedding model.',
   STORAGE_FAILED: 'Failed to initialize storage.',
+  STORAGE_UNAVAILABLE:
+    'IndexedDB is not available in this environment. Dhiya must run in a browser context (it cannot run during SSR).',
   INVALID_SOURCE: 'Invalid knowledge source format.',
   INDEXING_FAILED: 'Failed to index knowledge base.',
   QUERY_EMPTY: 'Query cannot be empty.',
@@ -211,37 +192,40 @@ export function mergeConfig(userConfig?: DhiyaConfig): Required<DhiyaConfig> {
     ? userConfig.llmFallbackOrder
     : DEFAULT_CONFIG.llmFallbackOrder
   ).slice();
-  
+
   // Validate and constrain values
   merged.chunkSize = Math.max(
     VALIDATION_CONSTRAINTS.minChunkSize,
     Math.min(VALIDATION_CONSTRAINTS.maxChunkSize, merged.chunkSize)
   );
-  
+
   merged.chunkOverlap = Math.max(
     VALIDATION_CONSTRAINTS.minChunkOverlap,
     Math.min(VALIDATION_CONSTRAINTS.maxChunkOverlap, merged.chunkOverlap)
   );
-  
+
+  // Overlap must stay well below chunk size or chunking cannot make progress
+  merged.chunkOverlap = Math.min(merged.chunkOverlap, Math.floor(merged.chunkSize / 2));
+
   merged.topK = Math.max(
     VALIDATION_CONSTRAINTS.minTopK,
     Math.min(VALIDATION_CONSTRAINTS.maxTopK, merged.topK)
   );
-  
+
   merged.similarityThreshold = Math.max(
     VALIDATION_CONSTRAINTS.minSimilarityThreshold,
     Math.min(VALIDATION_CONSTRAINTS.maxSimilarityThreshold, merged.similarityThreshold)
   );
-  
+
   merged.cacheTTL = Math.max(
     VALIDATION_CONSTRAINTS.minCacheTTL,
     Math.min(VALIDATION_CONSTRAINTS.maxCacheTTL, merged.cacheTTL)
   );
-  
+
   merged.maxCacheSize = Math.max(
     VALIDATION_CONSTRAINTS.minCacheSize,
     Math.min(VALIDATION_CONSTRAINTS.maxCacheSize, merged.maxCacheSize)
   );
-  
+
   return merged as Required<DhiyaConfig>;
 }

@@ -2,24 +2,24 @@
  * Semantic retrieval with diversity filtering
  */
 
-import { SearchResult, Chunk, RetrievalOptions } from '../core/types';
-import { cosineSimilarity } from '../utils/similarity';
+import { SearchResult, Chunk, RetrievalOptions } from '../core/types.js';
+import { cosineSimilarity } from '../utils/similarity.js';
 
 export class Retriever {
   private chunks: Chunk[] = [];
-  
+
   /**
    * Set the chunks to search through
    */
   setChunks(chunks: Chunk[]): void {
     this.chunks = chunks;
   }
-  
+
   /**
    * Retrieve relevant chunks for a query
    */
   async retrieve(
-    queryEmbedding: number[],
+    queryEmbedding: ArrayLike<number>,
     options: RetrievalOptions
   ): Promise<SearchResult[]> {
     const {
@@ -28,12 +28,11 @@ export class Retriever {
       useDiversity = true,
       diversityThreshold = 0.95
     } = options;
-    
+
     if (this.chunks.length === 0) {
       return [];
     }
-    
-    // Score all chunks
+
     const results: SearchResult[] = this.chunks
       .filter(chunk => chunk.embedding && chunk.embedding.length > 0)
       .map(chunk => ({
@@ -42,15 +41,14 @@ export class Retriever {
       }))
       .filter(result => result.similarity >= threshold)
       .sort((a, b) => b.similarity - a.similarity);
-    
+
     if (!useDiversity) {
       return results.slice(0, topK);
     }
-    
-    // Apply diversity filtering
+
     return this.applyDiversityFilter(results, topK, diversityThreshold);
   }
-  
+
   /**
    * Apply diversity filtering to avoid near-duplicate results
    */
@@ -60,11 +58,10 @@ export class Retriever {
     diversityThreshold: number
   ): SearchResult[] {
     const diverse: SearchResult[] = [];
-    
+
     for (const result of results) {
       if (diverse.length >= topK) break;
-      
-      // Check if too similar to already selected results
+
       const isTooSimilar = diverse.some(selected => {
         if (!result.chunk.embedding || !selected.chunk.embedding) return false;
         const similarity = cosineSimilarity(
@@ -73,15 +70,15 @@ export class Retriever {
         );
         return similarity >= diversityThreshold;
       });
-      
+
       if (!isTooSimilar) {
         diverse.push(result);
       }
     }
-    
+
     return diverse;
   }
-  
+
   /**
    * Get chunks by IDs
    */
@@ -89,14 +86,14 @@ export class Retriever {
     const idSet = new Set(ids);
     return this.chunks.filter(chunk => idSet.has(chunk.id));
   }
-  
+
   /**
    * Get all chunks
    */
   getAllChunks(): Chunk[] {
     return this.chunks;
   }
-  
+
   /**
    * Get chunk count
    */

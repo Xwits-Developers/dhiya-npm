@@ -14,27 +14,23 @@ export type DeviceCapabilities = {
  * Detect available device capabilities
  */
 export async function detectCapabilities(): Promise<DeviceCapabilities> {
-  const hasWebGPU = 'gpu' in navigator;
+  const nav: any = typeof navigator !== 'undefined' ? navigator : undefined;
+  const hasWebGPU = !!nav && 'gpu' in nav;
   const hasWASM = typeof WebAssembly !== 'undefined';
-  const hasChromeAI = typeof window !== 'undefined' &&
-                      'ai' in window &&
-                      'languageModel' in (window as any).ai;
-  
+  // Chrome's built-in Prompt API ships as a global `LanguageModel` object
+  const hasChromeAI = typeof (globalThis as any).LanguageModel !== 'undefined';
+
   // Estimate memory (if available)
   let estimatedMemory: number | undefined;
-  if ('deviceMemory' in navigator) {
-    estimatedMemory = (navigator as any).deviceMemory * 1024; // GB to MB
+  if (nav && 'deviceMemory' in nav) {
+    estimatedMemory = nav.deviceMemory * 1024; // GB to MB
   }
-  
-  // Consider low-end if:
-  // - No WebGPU
-  // - Low memory (< 4GB)
-  // - Mobile device
-  const isMobile = /mobile|android|iphone|ipad|ipod/i.test(navigator.userAgent);
-  const isLowEnd = !hasWebGPU || 
+
+  const isMobile = !!nav && /mobile|android|iphone|ipad|ipod/i.test(nav.userAgent || '');
+  const isLowEnd = !hasWebGPU ||
                    (estimatedMemory !== undefined && estimatedMemory < 4096) ||
                    isMobile;
-  
+
   return {
     hasWebGPU,
     hasWASM,
@@ -47,18 +43,14 @@ export async function detectCapabilities(): Promise<DeviceCapabilities> {
 /**
  * Select best available device for embeddings
  */
-export async function selectBestDevice(): Promise<'webgpu' | 'wasm' | 'cpu'> {
+export async function selectBestDevice(): Promise<'webgpu' | 'wasm'> {
   const caps = await detectCapabilities();
-  
+
   if (caps.hasWebGPU && !caps.isLowEnd) {
     return 'webgpu';
   }
-  
-  if (caps.hasWASM) {
-    return 'wasm';
-  }
-  
-  return 'cpu';
+
+  return 'wasm';
 }
 
 /**
@@ -66,15 +58,15 @@ export async function selectBestDevice(): Promise<'webgpu' | 'wasm' | 'cpu'> {
  */
 export async function logDeviceInfo(): Promise<void> {
   const caps = await detectCapabilities();
-  
-  console.log('🖥️ Device Capabilities:');
-  console.log('  WebGPU:', caps.hasWebGPU ? '✅' : '❌');
-  console.log('  WebAssembly:', caps.hasWASM ? '✅' : '❌');
-  console.log('  Chrome AI:', caps.hasChromeAI ? '✅' : '❌');
-  
+
+  console.log('Device capabilities:');
+  console.log('  WebGPU:', caps.hasWebGPU ? 'yes' : 'no');
+  console.log('  WebAssembly:', caps.hasWASM ? 'yes' : 'no');
+  console.log('  Chrome built-in AI:', caps.hasChromeAI ? 'yes' : 'no');
+
   if (caps.estimatedMemory) {
     console.log(`  Memory: ~${(caps.estimatedMemory / 1024).toFixed(1)}GB`);
   }
-  
-  console.log('  Profile:', caps.isLowEnd ? '📱 Low-end/Mobile' : '💻 High-end/Desktop');
+
+  console.log('  Profile:', caps.isLowEnd ? 'low-end/mobile' : 'desktop');
 }

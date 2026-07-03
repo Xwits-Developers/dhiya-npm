@@ -1,40 +1,42 @@
 /**
- * Chrome Built-in AI Provider (Gemini Nano)
- * Documentation: https://developer.chrome.com/docs/ai/built-in
+ * Chrome Built-in AI Provider (Gemini Nano) via the Prompt API.
+ *
+ * Targets the shipped API surface (Chrome 138+): a global `LanguageModel`
+ * object with availability() / create() / prompt() / promptStreaming().
+ * See https://developer.chrome.com/docs/ai/prompt-api
  */
 
-import { ILLMProvider, LLMGenerateOptions } from './base';
-import { ChromeAIOptions, LLMProvider } from '../core/types';
-import { DEFAULT_CHROME_AI_OPTIONS } from './config';
+import { ILLMProvider, LLMGenerateOptions } from './base.js';
+import { ChromeAIOptions, LLMProvider } from '../core/types.js';
+import { DEFAULT_CHROME_AI_OPTIONS } from './config.js';
 
-// Chrome AI types
-declare global {
-  interface Window {
-    ai?: {
-      languageModel?: {
-        capabilities(): Promise<{
-          available: 'readily' | 'after-download' | 'no';
-        }>;
-        create(options?: {
-          temperature?: number;
-          topK?: number;
-          initialPrompts?: Array<{
-            role: 'system' | 'user' | 'assistant';
-            content: string;
-          }>;
-        }): Promise<{
-          prompt(text: string): Promise<string>;
-          destroy(): void;
-        }>;
-      };
-    };
-  }
+type Availability = 'unavailable' | 'downloadable' | 'downloading' | 'available';
+
+interface LanguageModelSession {
+  prompt(text: string, options?: { signal?: AbortSignal }): Promise<string>;
+  promptStreaming(text: string, options?: { signal?: AbortSignal }): ReadableStream<string>;
+  destroy(): void;
+}
+
+interface LanguageModelStatic {
+  availability(options?: Record<string, unknown>): Promise<Availability>;
+  create(options?: {
+    temperature?: number;
+    topK?: number;
+    initialPrompts?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+    monitor?: (m: EventTarget) => void;
+    signal?: AbortSignal;
+  }): Promise<LanguageModelSession>;
+}
+
+function getLanguageModel(): LanguageModelStatic | undefined {
+  return (globalThis as any).LanguageModel as LanguageModelStatic | undefined;
 }
 
 export class ChromeAIProvider implements ILLMProvider {
   name = LLMProvider.CHROME_AI;
-  private session: any = null;
   private options: ChromeAIOptions;
+  private verified = false;
 
   constructor(options: ChromeAIOptions = DEFAULT_CHROME_AI_OPTIONS) {
     this.options = { ...options };
@@ -42,88 +44,89 @@ export class ChromeAIProvider implements ILLMProvider {
 
   setOptions(options: Partial<ChromeAIOptions>): void {
     this.options = { ...this.options, ...options };
-    if (this.session) {
-      this.session.destroy();
-      this.session = null;
-    }
   }
 
   async isAvailable(): Promise<boolean> {
     try {
-      if (typeof window === 'undefined') return false;
-      if (!window.ai?.languageModel) return false;
+      const lm = getLanguageModel();
+      if (!lm) return false;
 
-      const capabilities = await window.ai.languageModel.capabilities();
-      return capabilities.available === 'readily' || capabilities.available === 'after-download';
-    } catch (error) {
+      const availability = await lm.availability();
+      return availability === 'available' || availability === 'downloadable' || availability === 'downloading';
+    } catch {
       return false;
     }
   }
 
   async initialize(): Promise<void> {
-    if (this.session) return; // Already initialized
-
-    if (typeof window === 'undefined' || !window.ai?.languageModel) {
-      throw new Error('Chrome AI not available. Enable flags: chrome://flags/#prompt-api-for-gemini-nano');
+    const lm = getLanguageModel();
+    if (!lm) {
+      throw new Error(
+        'Chrome built-in AI is not available in this browser. It requires Chrome 138+ on supported hardware.'
+      );
     }
 
-    try {
-      const capabilities = await window.ai.languageModel.capabilities();
-
-      if (capabilities.available === 'no') {
-        throw new Error('Chrome AI not supported on this device');
-      }
-
-      if (capabilities.available === 'after-download') {
-        console.warn('Chrome AI model needs to be downloaded. Visit chrome://components/');
-      }
-
-      // Create session
-      this.session = await window.ai.languageModel.create({
-        temperature: this.options.temperature,
-        topK: this.options.topK,
-        initialPrompts: [
-          {
-            role: 'system',
-            content: this.options.systemPrompt
-          }
-        ]
-      });
-
-      console.log('✅ Chrome AI (Gemini Nano) initialized');
-    } catch (error) {
-      throw new Error(`Chrome AI initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    const availability = await lm.availability();
+    if (availability === 'unavailable') {
+      throw new Error('Chrome built-in AI is not supported on this device');
     }
+
+    // Creating a session triggers the model download when needed; verify we
+    // can create one, then release it. Per-query sessions are created in
+    // generate() so context never accumulates across unrelated questions.
+    const session = await lm.create(this.createOptions());
+    session.destroy();
+    this.verified = true;
   }
 
   async generate(prompt: string, options?: LLMGenerateOptions): Promise<string> {
-    if (options?.systemPrompt && options.systemPrompt !== this.options.systemPrompt) {
-      this.setOptions({ systemPrompt: options.systemPrompt });
+    const lm = getLanguageModel();
+    if (!lm) {
+      throw new Error('Chrome built-in AI not available');
     }
 
-    if (!this.session) {
+    if (!this.verified) {
       await this.initialize();
     }
 
+    const systemPrompt = options?.systemPrompt || this.options.systemPrompt;
+    const session = await lm.create(this.createOptions(systemPrompt));
+
     try {
-      // Add context if provided
-      let fullPrompt = prompt;
-      if (options?.context) {
-        fullPrompt = `Context:\n${options.context}\n\nQuestion: ${prompt}`;
+      const fullPrompt = options?.context
+        ? `Context:\n${options.context}\n\nQuestion: ${prompt}`
+        : prompt;
+
+      if (options?.onToken) {
+        const stream = session.promptStreaming(fullPrompt);
+        const reader = stream.getReader();
+        let text = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          text += value;
+          options.onToken(value);
+        }
+        return text.trim();
       }
 
-      const response = await this.session.prompt(fullPrompt);
+      const response = await session.prompt(fullPrompt);
       return response.trim();
-    } catch (error) {
-      throw new Error(`Chrome AI generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      session.destroy();
     }
   }
 
   async cleanup(): Promise<void> {
-    if (this.session) {
-      this.session.destroy();
-      this.session = null;
-      console.log('🧹 Chrome AI session cleaned up');
-    }
+    this.verified = false;
+  }
+
+  private createOptions(systemPrompt?: string) {
+    const sp = systemPrompt || this.options.systemPrompt;
+    return {
+      ...(this.options.temperature !== undefined ? { temperature: this.options.temperature } : {}),
+      ...(this.options.topK !== undefined ? { topK: this.options.topK } : {}),
+      initialPrompts: sp ? [{ role: 'system' as const, content: sp }] : []
+    };
   }
 }

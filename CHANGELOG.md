@@ -5,6 +5,93 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-07-03
+
+Production-grade rewrite focused on answer correctness, real-world Chrome/LLM
+support, and packaging that actually loads everywhere.
+
+### Fixed
+- **Query classifier no longer hijacks real questions.** Queries containing
+  substrings like "ty" ("warranty", "security"), or starting with "hi"
+  ("history…"), "yes" ("yesterday…"), "great", "no" were answered with canned
+  small-talk instead of retrieval. Small talk now requires the entire message
+  to match; keyword-based "out of scope" refusals (weather/forecast/
+  temperature/time) are gone — retrieval decides.
+- **Answer cache is invalidated when knowledge changes**, expired entries are
+  no longer served (TTL enforced on read), eviction is true LRU, and
+  "no information" responses are never cached.
+- **Chunker terminates on all inputs.** The previous overlap guard compared a
+  text offset to a string length and could infinite-loop (e.g. chunkSize 300 /
+  overlap 290), duplicate content, or silently drop mid-document chunks.
+  Chunking is now paragraph-first with sentence-aligned overlap and never
+  drops content.
+- **Embedding failures throw instead of silently returning zero vectors** that
+  poisoned the persisted index.
+- **Multilingual queries survive normalization** (Unicode-aware; Hindi/Chinese/
+  accented queries no longer collapse to an empty cache key).
+- **`import 'dhiya-npm'` works in Node ESM, Vite SSR, and CDNs** — compiled
+  output now uses explicit `.js` specifiers. A packaging smoke test runs on
+  every publish.
+- Re-ingesting unnamed sources no longer re-embeds and duplicates the entire
+  knowledge base on every page load (stable default document ids).
+- URL ingestion strips `<script>`/`<style>` content before indexing.
+- Failed LLM initialization is remembered instead of re-probed (and re-timed-out)
+  on every question.
+
+### Changed
+- **Chrome built-in AI provider now targets the shipped Prompt API** (global
+  `LanguageModel`, Chrome 138+). The old `window.ai.languageModel` origin-trial
+  surface it previously used no longer exists, so the provider never activated.
+- **Default local LLM is `onnx-community/Qwen2.5-0.5B-Instruct`** (chat-tuned,
+  grounded prompting) replacing DistilGPT-2, a 2019 base model that produced
+  hallucinated "enhancements".
+- **Upgraded to `@huggingface/transformers` v4** (from the unmaintained
+  `@xenova/transformers` v2): embeddings genuinely run on WebGPU with WASM
+  fallback — previously the selected device was never applied and the "WebGPU
+  embeddings" claim was aspirational.
+- `singleAnswerMode` now defaults to `false`; the hidden "definitional query"
+  heuristic that truncated answers to the first sentence of the top chunk is
+  removed. Answers are grounded LLM responses (or focused extractive snippets).
+- **ESM-only package.** The CJS build never loaded (`dist-cjs` lacked a
+  CommonJS package.json under a `"type": "module"` root) and is removed; the
+  exports map now includes `types`/`default` conditions and `./package.json`.
+- Embeddings are persisted as `Float32Array` (half the IndexedDB footprint).
+- Requires Node >= 18 for tooling; browsers are the runtime target.
+
+### Added
+- **`<dhiya-chat>` web component** (`dhiya-npm/widget`): a complete floating
+  chat UI configurable via attributes, with inline or URL knowledge sources —
+  one script tag to integrate on any site.
+- **Token streaming**: `ask(query, { onToken })` streams from both Chrome AI
+  (`promptStreaming`) and Transformers.js (`TextStreamer`).
+- `search(query)` for raw scored retrieval, `removeDocument(docId)`,
+  `skipCache`, configurable `noAnswerMessage`, and
+  `disableQueryClassification`.
+- Honest README: no fabricated benchmarks, real browser support matrix,
+  model download sizes stated up front, working CDN snippet.
+- Test suite rewritten: 92 tests including deterministic retrieval-ranking
+  tests, storage TTL/LRU tests, LLM fallback tests, and regressions for every
+  bug above.
+
+### Removed
+- Unpublished, non-building framework wrapper packages (`packages/dhiya-react`,
+  `dhiya-vue`, `dhiya-svelte`) and their CI publish jobs. The `<dhiya-chat>`
+  widget plus the core API cover framework integration; wrappers may return as
+  separate, tested packages.
+- 73 MB of committed ONNX WASM binaries in the example app; a dozen internal
+  status/checklist documents; the broken `examples/` snippets.
+
+### Migration from 1.x
+- Use `import` (ESM). If you called `require('dhiya-npm')` — that never worked
+  in 1.x either.
+- Default answers are now full grounded responses; set
+  `singleAnswerMode: true` to keep 1.x-style short snippets.
+- `strictRAG`, `minChunksForLLM`, and `AskOptions.useRewrite` were removed
+  (`minLLMSimilarity` covers hallucination gating; `useRewrite` was a no-op).
+- The default Transformers model changed; the old GPT-2 family still works if
+  you explicitly set `transformersModel`, but is not recommended.
+- Chunk embeddings read back from storage are `Float32Array`, not `number[]`.
+
 ## [1.0.2] - 2025-10-15
 
 ### Added

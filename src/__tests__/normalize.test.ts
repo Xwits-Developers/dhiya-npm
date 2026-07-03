@@ -53,8 +53,30 @@ describe('Normalize Utils', () => {
     it('should clean whitespace', () => {
       const query = '  Extra   spaces  ';
       const normalized = normalizeQuery(query);
-      
+
       expect(normalized).toBe('extra spaces');
+    });
+
+    it('regression: preserves non-Latin scripts', () => {
+      expect(normalizeQuery('क्या है कीमत?')).toBe('क्या है कीमत');
+      expect(normalizeQuery('什么是价格')).toBe('什么是价格');
+      expect(normalizeQuery('café pricing')).toBe('café pricing');
+    });
+
+    it('regression: never returns an empty string for non-empty input', () => {
+      expect(normalizeQuery('!!!')).not.toBe('');
+      expect(normalizeQuery('¿?')).not.toBe('');
+    });
+  });
+
+  describe('cleanText paragraph preservation', () => {
+    it('regression: keeps paragraph breaks for the chunker', () => {
+      const text = 'Paragraph one.\n\nParagraph two.';
+      expect(cleanText(text)).toBe('Paragraph one.\n\nParagraph two.');
+    });
+
+    it('collapses excessive blank lines to one break', () => {
+      expect(cleanText('A\n\n\n\n\nB')).toBe('A\n\nB');
     });
   });
   

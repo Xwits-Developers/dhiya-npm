@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dhiya — Client-side RAG Demo</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 24px;
+      color: #111827;
+      background: #f9fafb;
+    }
+    h1 { font-size: 22px; }
+    .card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    #status { font-size: 13px; color: #6b7280; min-height: 20px; }
+    #meta { font-size: 12px; color: #6b7280; margin-top: 6px; }
+    textarea {
+      width: 100%;
+      height: 140px;
+      font: 13px/1.5 ui-monospace, monospace;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      padding: 10px;
+    }
+    button {
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    button:disabled { opacity: .5; cursor: default; }
+    #chat-log { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+    .msg { padding: 10px 12px; border-radius: 10px; max-width: 85%; white-space: pre-wrap; }
+    .msg.user { align-self: flex-end; background: #4f46e5; color: #fff; }
+    .msg.bot { align-self: flex-start; background: #f3f4f6; }
+    .msg.bot .src { margin-top: 6px; font-size: 11px; color: #6b7280; }
+    .askrow { display: flex; gap: 8px; }
+    .askrow input { flex: 1; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px; font: inherit; }
+    .askrow button { margin-top: 0; }
+  </style>
+</head>
+<body>
+  <h1>🧠 Dhiya — client-side RAG demo</h1>
+  <p>Everything below runs in your browser: embeddings, vector search, and (when available) a local LLM. No servers, no API keys.</p>
+
+  <div class="card">
+    <div id="status">Booting…</div>
+    <div id="meta"></div>
+  </div>
+
+  <div class="card">
+    <strong>1 — Knowledge base</strong>
+    <p style="font-size:13px;color:#6b7280">Paste any text and index it. Blank lines separate paragraphs.</p>
+    <textarea id="kb">Dhiya is a client-side RAG chatbot library that runs entirely in the browser. It requires no servers and no API keys, and user data never leaves the device.
+
+Dhiya stores knowledge in IndexedDB, so an indexed knowledge base survives page reloads and works offline after the first load.
+
+The warranty for Acme gadgets covers manufacturing defects for two years from the date of purchase. Accidental damage is not covered.
+
+Acme support is available 24/7 via chat. Refunds can be requested within 30 days of purchase for a full reimbursement.</textarea>
+    <button id="load">Index knowledge</button>
+  </div>
+
+  <div class="card">
+    <strong>2 — Ask questions</strong>
+    <div id="chat-log"></div>
+    <div class="askrow">
+      <input id="q" placeholder="e.g. What does the warranty cover?" />
+      <button id="ask">Ask</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

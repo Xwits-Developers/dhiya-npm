@@ -3,7 +3,8 @@
  */
 
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Chunk, ManifestEntry, CacheEntry } from '../core/types';
+import { Chunk, ManifestEntry, CacheEntry } from '../core/types.js';
+import { ERROR_MESSAGES } from '../core/config.js';
 
 interface DhiyaDB extends DBSchema {
   chunks: {
@@ -25,190 +26,222 @@ export class StorageManager {
   private db: IDBPDatabase<DhiyaDB> | null = null;
   private dbName: string;
   private version = 1;
-  
+  private initPromise: Promise<void> | null = null;
+
   constructor(dbName: string = 'dhiya-kb') {
     this.dbName = dbName;
   }
-  
+
   /**
-   * Initialize database
+   * Initialize database. Safe to call concurrently.
    */
   async initialize(): Promise<void> {
+    if (this.db) return;
+
+    if (typeof indexedDB === 'undefined') {
+      throw new Error(ERROR_MESSAGES.STORAGE_UNAVAILABLE);
+    }
+
+    if (!this.initPromise) {
+      this.initPromise = this._open().finally(() => {
+        this.initPromise = null;
+      });
+    }
+    return this.initPromise;
+  }
+
+  private async _open(): Promise<void> {
     this.db = await openDB<DhiyaDB>(this.dbName, this.version, {
       upgrade(db: IDBPDatabase<DhiyaDB>) {
-        // Chunks store
         if (!db.objectStoreNames.contains('chunks')) {
           const chunkStore = db.createObjectStore('chunks', { keyPath: 'id' });
           chunkStore.createIndex('by-doc', 'doc_id');
         }
-        
-        // Manifest store
+
         if (!db.objectStoreNames.contains('manifest')) {
           db.createObjectStore('manifest', { keyPath: 'doc_id' });
         }
-        
-        // Cache store
+
         if (!db.objectStoreNames.contains('cache')) {
           db.createObjectStore('cache', { keyPath: 'query' });
         }
+      },
+      // Yield the connection so another tab can upgrade the schema
+      blocking: () => {
+        this.db?.close();
+        this.db = null;
+      },
+      terminated: () => {
+        this.db = null;
       }
     });
   }
-  
+
+  private requireDB(): IDBPDatabase<DhiyaDB> {
+    if (!this.db) throw new Error('Database not initialized');
+    return this.db;
+  }
+
   /**
-   * Save chunks
+   * Save chunks. Embeddings are stored as Float32Array (structured clone
+   * handles typed arrays natively and halves the on-disk footprint vs
+   * float64 plain arrays).
    */
   async saveChunks(chunks: Chunk[]): Promise<void> {
-    if (!this.db) throw new Error('Database not initialized');
-    
-    const tx = this.db.transaction('chunks', 'readwrite');
+    const db = this.requireDB();
+
+    const tx = db.transaction('chunks', 'readwrite');
     await Promise.all([
-      ...chunks.map(chunk => tx.store.put(chunk)),
+      ...chunks.map(chunk =>
+        tx.store.put({
+          ...chunk,
+          embedding:
+            chunk.embedding && !(chunk.embedding instanceof Float32Array)
+              ? Float32Array.from(chunk.embedding)
+              : chunk.embedding
+        })
+      ),
       tx.done
     ]);
   }
-  
-  /**
-   * Get all chunks
-   */
+
   async getAllChunks(): Promise<Chunk[]> {
-    if (!this.db) throw new Error('Database not initialized');
-    return await this.db.getAll('chunks');
+    return await this.requireDB().getAll('chunks');
   }
-  
-  /**
-   * Get chunks by document ID
-   */
+
   async getChunksByDocId(docId: string): Promise<Chunk[]> {
-    if (!this.db) throw new Error('Database not initialized');
-    return await this.db.getAllFromIndex('chunks', 'by-doc', docId);
+    return await this.requireDB().getAllFromIndex('chunks', 'by-doc', docId);
   }
-  
+
   /**
-   * Delete chunks by document ID
+   * Delete chunks by document ID in a single transaction.
    */
   async deleteChunksByDocId(docId: string): Promise<void> {
-    if (!this.db) throw new Error('Database not initialized');
-    
-    const chunks = await this.getChunksByDocId(docId);
-    const tx = this.db.transaction('chunks', 'readwrite');
-    await Promise.all([
-      ...chunks.map(chunk => tx.store.delete(chunk.id)),
-      tx.done
-    ]);
+    const db = this.requireDB();
+    const tx = db.transaction('chunks', 'readwrite');
+    const index = tx.store.index('by-doc');
+
+    let cursor = await index.openKeyCursor(docId);
+    while (cursor) {
+      await tx.store.delete(cursor.primaryKey);
+      cursor = await cursor.continue();
+    }
+    await tx.done;
   }
-  
-  /**
-   * Save manifest entry
-   */
+
   async saveManifest(entry: ManifestEntry): Promise<void> {
-    if (!this.db) throw new Error('Database not initialized');
-    await this.db.put('manifest', entry);
+    await this.requireDB().put('manifest', entry);
   }
-  
-  /**
-   * Get manifest entry
-   */
+
   async getManifest(docId: string): Promise<ManifestEntry | undefined> {
-    if (!this.db) throw new Error('Database not initialized');
-    return await this.db.get('manifest', docId);
+    return await this.requireDB().get('manifest', docId);
   }
-  
-  /**
-   * Get all manifests
-   */
+
   async getAllManifests(): Promise<ManifestEntry[]> {
-    if (!this.db) throw new Error('Database not initialized');
-    return await this.db.getAll('manifest');
+    return await this.requireDB().getAll('manifest');
   }
-  
+
+  async deleteManifest(docId: string): Promise<void> {
+    await this.requireDB().delete('manifest', docId);
+  }
+
   /**
    * Cache an answer
    */
   async cacheAnswer(_query: string, entry: CacheEntry): Promise<void> {
-    if (!this.db) throw new Error('Database not initialized');
-    await this.db.put('cache', entry);
+    await this.requireDB().put('cache', entry);
   }
-  
+
   /**
-   * Get cached answer
+   * Get cached answer. Enforces TTL on read (expired entries are removed)
+   * and refreshes the timestamp on hit so eviction is LRU, not FIFO.
    */
-  async getCachedAnswer(query: string): Promise<CacheEntry | undefined> {
-    if (!this.db) throw new Error('Database not initialized');
-    return await this.db.get('cache', query);
+  async getCachedAnswer(query: string, ttl?: number): Promise<CacheEntry | undefined> {
+    const db = this.requireDB();
+    const entry = await db.get('cache', query);
+    if (!entry) return undefined;
+
+    if (ttl !== undefined && Date.now() - entry.timestamp > ttl) {
+      await db.delete('cache', query);
+      return undefined;
+    }
+
+    // LRU touch
+    const touched = { ...entry, timestamp: Date.now() };
+    await db.put('cache', touched);
+    return touched;
   }
-  
+
+  /**
+   * Clear all cached answers (called when the knowledge base changes).
+   */
+  async clearCache(): Promise<void> {
+    await this.requireDB().clear('cache');
+  }
+
   /**
    * Clear expired cache entries
    */
   async clearExpiredCache(ttl: number): Promise<void> {
-    if (!this.db) throw new Error('Database not initialized');
-    
+    const db = this.requireDB();
+
     const now = Date.now();
-    const allEntries = await this.db.getAll('cache');
+    const allEntries = await db.getAll('cache');
     const expired = allEntries.filter((entry: CacheEntry) => now - entry.timestamp > ttl);
-    
+
     if (expired.length > 0) {
-      const tx = this.db.transaction('cache', 'readwrite');
+      const tx = db.transaction('cache', 'readwrite');
       await Promise.all([
         ...expired.map((entry: CacheEntry) => tx.store.delete(entry.query)),
         tx.done
       ]);
     }
   }
-  
+
   /**
-   * Limit cache size (LRU eviction)
+   * Limit cache size (least-recently-used eviction)
    */
   async limitCacheSize(maxSize: number): Promise<void> {
-    if (!this.db) throw new Error('Database not initialized');
-    
-    const allEntries = await this.db.getAll('cache');
-    
-    if (allEntries.length > maxSize) {
-      // Sort by timestamp (oldest first)
-      allEntries.sort((a: CacheEntry, b: CacheEntry) => a.timestamp - b.timestamp);
-      
-      // Remove oldest entries
-      const toRemove = allEntries.slice(0, allEntries.length - maxSize);
-      const tx = this.db.transaction('cache', 'readwrite');
-      await Promise.all([
-        ...toRemove.map((entry: CacheEntry) => tx.store.delete(entry.query)),
-        tx.done
-      ]);
-    }
+    const db = this.requireDB();
+
+    const count = await db.count('cache');
+    if (count <= maxSize) return;
+
+    const allEntries = await db.getAll('cache');
+    allEntries.sort((a: CacheEntry, b: CacheEntry) => a.timestamp - b.timestamp);
+
+    const toRemove = allEntries.slice(0, allEntries.length - maxSize);
+    const tx = db.transaction('cache', 'readwrite');
+    await Promise.all([
+      ...toRemove.map((entry: CacheEntry) => tx.store.delete(entry.query)),
+      tx.done
+    ]);
   }
-  
-  /**
-   * Get storage statistics
-   */
+
   async getStats(): Promise<{
     chunkCount: number;
     cacheSize: number;
     documentCount: number;
   }> {
-    if (!this.db) throw new Error('Database not initialized');
-    
-    const [chunkCount, cacheSize, manifests] = await Promise.all([
-      this.db.count('chunks'),
-      this.db.count('cache'),
-      this.db.getAll('manifest')
+    const db = this.requireDB();
+
+    const [chunkCount, cacheSize, documentCount] = await Promise.all([
+      db.count('chunks'),
+      db.count('cache'),
+      db.count('manifest')
     ]);
-    
+
     return {
       chunkCount,
       cacheSize,
-      documentCount: manifests.length
+      documentCount
     };
   }
-  
-  /**
-   * Clear all data
-   */
+
   async clearAll(): Promise<void> {
-    if (!this.db) throw new Error('Database not initialized');
-    
-    const tx = this.db.transaction(['chunks', 'manifest', 'cache'], 'readwrite');
+    const db = this.requireDB();
+
+    const tx = db.transaction(['chunks', 'manifest', 'cache'], 'readwrite');
     await Promise.all([
       tx.objectStore('chunks').clear(),
       tx.objectStore('manifest').clear(),
@@ -216,10 +249,7 @@ export class StorageManager {
       tx.done
     ]);
   }
-  
-  /**
-   * Close database connection
-   */
+
   async close(): Promise<void> {
     if (this.db) {
       this.db.close();

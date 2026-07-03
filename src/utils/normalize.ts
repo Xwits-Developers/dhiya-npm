@@ -8,19 +8,24 @@
 const STOP_WORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
   'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the',
-  'to', 'was', 'will', 'with', 'the', 'this', 'but', 'they', 'have'
+  'to', 'was', 'will', 'with', 'this', 'but', 'they', 'have'
 ]);
 
 /**
- * Normalize query text
+ * Normalize query text. Unicode-aware: letters and digits in any script
+ * are preserved so multilingual queries survive normalization.
  */
 export function normalizeQuery(query: string): string {
-  return query
+  const normalized = query
     .toLowerCase()
-    // Remove punctuation except hyphens and apostrophes within words
-    .replace(/[^\w\s'-]/g, '')
+    // Keep letters, combining marks (Devanagari matras etc.), digits in any
+    // script, whitespace, hyphens and apostrophes
+    .replace(/[^\p{L}\p{M}\p{N}\s'-]/gu, '')
     .trim()
     .replace(/\s+/g, ' ');
+
+  // Never normalize down to an empty string (would collide in the cache)
+  return normalized || query.trim().toLowerCase();
 }
 
 /**
@@ -33,18 +38,21 @@ export function removeStopWords(query: string): string {
 }
 
 /**
- * Clean text content
+ * Clean text content. Paragraph structure (blank lines) is preserved so the
+ * chunker can split on natural boundaries.
  */
 export function cleanText(text: string): string {
   return text
-    // Remove extra whitespace
-    .replace(/\s+/g, ' ')
-    // Remove control characters
-    .replace(/[\x00-\x1F\x7F]/g, '')
-    // Normalize quotes
-    .replace(/[""]/g, '"')
-    .replace(/['']/g, "'")
-    // Trim
+    // Normalize line endings
+    .replace(/\r\n?/g, '\n')
+    // Remove control characters except newline/tab
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    // Collapse horizontal whitespace runs
+    .replace(/[ \t]+/g, ' ')
+    // Trim spaces around newlines
+    .replace(/ ?\n ?/g, '\n')
+    // Collapse 3+ newlines into a paragraph break
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
@@ -64,7 +72,7 @@ export function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength) {
     return text;
   }
-  
+
   return text.slice(0, maxLength - 3) + '...';
 }
 

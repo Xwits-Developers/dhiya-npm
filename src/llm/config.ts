@@ -1,49 +1,42 @@
-import { ChromeAIOptions, TransformersOptions } from '../core/types';
+import { ChromeAIOptions, TransformersOptions } from '../core/types.js';
+
+const GROUNDED_SYSTEM_PROMPT =
+  'You are a helpful assistant that answers questions using ONLY the provided context. ' +
+  'Answer concisely in complete sentences. If the context does not contain the answer, ' +
+  'say you do not have that information. Never invent facts.';
 
 /**
  * Default Transformers.js options
  */
 export const DEFAULT_TRANSFORMERS_OPTIONS: TransformersOptions = {
-  model: 'Xenova/distilgpt2',
-  systemPrompt: `You are a helpful AI assistant. Provide concise, accurate answers based on the given context. Be direct and helpful.`,
-  maxTokens: 150,
-  temperature: 0.7,
-  topK: 50,
+  model: 'onnx-community/Qwen2.5-0.5B-Instruct',
+  systemPrompt: GROUNDED_SYSTEM_PROMPT,
+  maxTokens: 256,
+  temperature: 0.2,
+  topK: 40,
   topP: 0.9,
-  repetitionPenalty: 1.2,
-  doSample: true,
+  repetitionPenalty: 1.1,
+  doSample: false,
   allowLocalModels: false,
-  useBrowserCache: true
+  useBrowserCache: true,
+  device: 'auto',
+  dtype: 'q4'
 };
 
 /**
- * Default Chrome AI options
+ * Default Chrome built-in AI options
  */
 export const DEFAULT_CHROME_AI_OPTIONS: ChromeAIOptions = {
-  systemPrompt: `You are a helpful AI assistant. Provide clear, concise answers based on the context provided. If you don't know something, say so. Be professional and friendly.`,
-  temperature: 0.7,
-  topK: 3
+  systemPrompt: GROUNDED_SYSTEM_PROMPT
 };
 
 /**
- * LLM timeout budgets (milliseconds)
+ * LLM timeout budgets (milliseconds). Generation only — model download and
+ * initialization are budgeted separately.
  */
 export const LLM_TIMEOUTS = {
-  chromeAI: 5000,      // 5 seconds
-  transformers: 10000,  // 10 seconds
-  fallback: 2000       // 2 seconds for quick fallback
-};
-
-/**
- * When to use LLM enhancement
- */
-export const LLM_USAGE_POLICY = {
-  // High confidence = skip LLM (RAG is good enough)
-  skipLLMThreshold: 0.75,
-  
-  // Medium confidence = quick LLM enhancement
-  mediumConfidenceThreshold: 0.5,
-  
-  // Low confidence = full LLM with longer timeout
-  lowConfidenceThreshold: 0.25
+  chromeAI: 20000,
+  transformers: 45000,
+  /** One-time model download/initialization budget. */
+  initialize: 300000
 };

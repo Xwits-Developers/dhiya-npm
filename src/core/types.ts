@@ -26,7 +26,8 @@ export interface Chunk {
   doc_id: string;
   source: string;
   content: string;
-  embedding?: number[];
+  /** Stored as Float32Array in IndexedDB; plain arrays are accepted on input. */
+  embedding?: Float32Array | number[];
   metadata?: Record<string, any>;
 }
 
@@ -48,8 +49,8 @@ export interface JSONKnowledgeSource {
 
 export interface TextKnowledgeSource {
   type: 'text';
-  content?: string;  // Made optional for backward compat
-  data?: string;      // Alternative property name
+  content?: string;
+  data?: string; // alternative property name, kept for compatibility
   documentId?: string;
   metadata?: Record<string, any>;
 }
@@ -95,7 +96,8 @@ export interface Answer {
   provider?: LLMProvider;
   timing: TimingInfo;
   metadata?: Record<string, any>;
-  topSource?: Source; // Highest similarity source (especially for singleAnswerMode)
+  /** Highest-similarity source, when any source matched. */
+  topSource?: Source;
 }
 
 export interface Source {
@@ -133,13 +135,16 @@ export interface LLMGenerateOptions {
   systemPrompt?: string;
   maxTokens?: number;
   temperature?: number;
-  contextChunks?: string[];
+  context?: string;
+  timeout?: number;
+  /** Called with each new text fragment as the model generates it. */
+  onToken?: (token: string) => void;
 }
 
 export interface ChromeAIOptions {
   systemPrompt: string;
-  temperature: number;
-  topK: number;
+  temperature?: number;
+  topK?: number;
 }
 
 export interface TransformersOptions {
@@ -153,6 +158,10 @@ export interface TransformersOptions {
   doSample: boolean;
   allowLocalModels: boolean;
   useBrowserCache: boolean;
+  /** 'auto' picks WebGPU when available, falling back to WASM. */
+  device?: 'auto' | 'webgpu' | 'wasm';
+  /** Quantization of the generation model, e.g. 'q4', 'q4f16', 'fp16', 'fp32'. */
+  dtype?: string;
 }
 
 // ============================================================================
@@ -164,21 +173,21 @@ export interface DhiyaConfig {
   dbName?: string;
   cacheTTL?: number; // milliseconds
   maxCacheSize?: number; // number of entries
-  
+
   // Embedding configuration
   embeddingModel?: EmbeddingModel;
   device?: DeviceType;
-  
+
   // Chunking configuration
   chunkSize?: number; // characters
   chunkOverlap?: number; // characters
-  
+
   // Retrieval configuration
   topK?: number;
   similarityThreshold?: number;
   useDiversity?: boolean;
   diversityThreshold?: number;
-  
+
   // LLM configuration
   enableLLM?: boolean;
   preferredProvider?: LLMProvider;
@@ -186,18 +195,21 @@ export interface DhiyaConfig {
   transformersOptions?: Partial<TransformersOptions>;
   chromeAIOptions?: Partial<ChromeAIOptions>;
   llmFallbackOrder?: LLMProvider[];
-  fallbackToRAGOnly?: boolean;
-  
-  // Hallucination controls
-  strictRAG?: boolean;              // If true, never call LLM when retrieved context is small/low similarity
-  minLLMSimilarity?: number;        // Minimum top similarity required before LLM enhancement
-  minChunksForLLM?: number;         // Require at least this many chunks in KB before LLM can be used
-  maxContextChars?: number;         // Max characters of context to pass into LLM
-  
-  // Answer formatting
-  singleAnswerMode?: boolean;       // Return distilled top chunk only
-  answerLengthLimit?: number;       // Character cap in single answer mode
-  
+
+  // Answer quality controls
+  /** Minimum top-chunk similarity before the LLM is asked to answer. */
+  minLLMSimilarity?: number;
+  /** Max characters of retrieved context passed to the LLM. */
+  maxContextChars?: number;
+  /** Return only a focused snippet from the top chunk (no LLM, no synthesis). */
+  singleAnswerMode?: boolean;
+  /** Character cap for singleAnswerMode snippets. */
+  answerLengthLimit?: number;
+  /** Message returned when nothing relevant is found in the knowledge base. */
+  noAnswerMessage?: string;
+  /** Skip the greeting/small-talk classifier and always run retrieval. */
+  disableQueryClassification?: boolean;
+
   // Advanced options
   debug?: boolean;
   onProgress?: (event: ProgressEvent) => void;
@@ -205,7 +217,7 @@ export interface DhiyaConfig {
 }
 
 export type EmbeddingModel = 'english' | 'multilingual';
-export type DeviceType = 'auto' | 'webgpu' | 'wasm' | 'cpu';
+export type DeviceType = 'auto' | 'webgpu' | 'wasm';
 
 // ============================================================================
 // Status & Progress Types
@@ -237,7 +249,7 @@ export interface StorageStatus {
 export interface KBStatus {
   documentCount: number;
   chunkCount: number;
-  sourceCount: number;  // Number of knowledge sources loaded
+  sourceCount: number;
   indexed: boolean;
   lastUpdated?: number;
 }
@@ -266,10 +278,14 @@ export enum ProgressType {
 
 export interface AskOptions {
   topK?: number;
-  useRewrite?: boolean;
   enableLLM?: boolean;
-  timeout?: number; // milliseconds
+  /** Milliseconds allowed for LLM generation before falling back to the extractive answer. */
+  timeout?: number;
   conversationHistory?: ConversationTurn[];
+  /** Called with incremental text as the answer is generated (LLM providers stream; extractive answers arrive in one call). */
+  onToken?: (token: string) => void;
+  /** Skip the answer cache for this query. */
+  skipCache?: boolean;
 }
 
 export interface ConversationTurn {

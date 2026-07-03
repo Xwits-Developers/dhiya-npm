@@ -1,26 +1,28 @@
 /**
- * Main Dhiya Client - Orchestrates all components
+ * Main Dhiya Client - orchestrates chunking, embeddings, retrieval,
+ * storage, and local LLM answer generation.
  */
 
-import { 
-  DhiyaConfig, 
-  KnowledgeSource, 
-  Answer, 
+import {
+  DhiyaConfig,
+  KnowledgeSource,
+  Answer,
   AskOptions,
   ClientStatus,
   ProgressType,
-  LLMProvider
-} from './core/types';
-import { mergeConfig, ERROR_MESSAGES, PERFORMANCE_THRESHOLDS } from './core/config';
-import { EmbeddingManager } from './rag/embeddings';
-import { Retriever } from './rag/retriever';
-import { synthesizeAnswer, formatAnswer, createLLMPrompt } from './rag/answerer';
-import { createChunks } from './rag/chunker';
-import { StorageManager } from './storage/indexeddb';
-import { normalizeQuery, hashText } from './utils/normalize';
-import { extractUrls } from './utils/normalize';
-import { LLMManager } from './llm/llm-manager';
-import { classifyQuery, shouldUseLLM, getConversationalResponse, getOutOfScopeResponse, QueryType } from './llm/query-classifier';
+  LLMProvider,
+  SearchResult,
+  Source
+} from './core/types.js';
+import { mergeConfig, ERROR_MESSAGES } from './core/config.js';
+import { EmbeddingManager } from './rag/embeddings.js';
+import { Retriever } from './rag/retriever.js';
+import { synthesizeAnswer, createLLMPrompt, extractFocusedSnippet, queryKeywords, extractAllUrls, formatAnswer } from './rag/answerer.js';
+import { createChunks } from './rag/chunker.js';
+import { StorageManager } from './storage/indexeddb.js';
+import { normalizeQuery, hashText } from './utils/normalize.js';
+import { LLMManager } from './llm/llm-manager.js';
+import { classifyQuery, shouldUseLLM, getConversationalResponse, getOutOfScopeResponse, QueryType } from './llm/query-classifier.js';
 
 export class DhiyaClient {
   private config: Required<DhiyaConfig>;
@@ -29,68 +31,73 @@ export class DhiyaClient {
   private storage: StorageManager;
   private llm?: LLMManager;
   private initialized = false;
-  
+  private initPromise: Promise<void> | null = null;
+
   constructor(config?: DhiyaConfig) {
     this.config = mergeConfig(config);
     this.embeddings = new EmbeddingManager(this.config.onProgress);
     this.retriever = new Retriever();
     this.storage = new StorageManager(this.config.dbName);
-    
-    // Initialize LLM if enabled
+
     if (this.config.enableLLM) {
       this.llm = new LLMManager({
         preferredProvider: this.config.preferredProvider,
         chromeAIOptions: { ...this.config.chromeAIOptions },
         transformersOptions: { ...this.config.transformersOptions },
-        fallbackOrder: [...this.config.llmFallbackOrder]
+        fallbackOrder: [...this.config.llmFallbackOrder],
+        debug: this.config.debug
       });
     }
   }
-  
+
   /**
-   * Initialize the client
+   * Initialize the client. Safe to call multiple times / concurrently.
    */
   async initialize(): Promise<void> {
     if (this.initialized) return;
-    
+    if (this.initPromise) return this.initPromise;
+
+    this.initPromise = this._initialize().finally(() => {
+      this.initPromise = null;
+    });
+    return this.initPromise;
+  }
+
+  private async _initialize(): Promise<void> {
     this.emitProgress(ProgressType.INIT, 'Initializing Dhiya...', 0);
-    
+
     try {
-      // Initialize storage
-      this.emitProgress(ProgressType.INIT, 'Initializing storage...', 20);
+      this.emitProgress(ProgressType.INIT, 'Initializing storage...', 10);
       await this.storage.initialize();
-      
-      // Clear expired cache
+
       await this.storage.clearExpiredCache(this.config.cacheTTL);
       await this.storage.limitCacheSize(this.config.maxCacheSize);
-      
-      // Initialize embeddings
-      this.emitProgress(ProgressType.INIT, 'Loading embedding model...', 40);
+
+      this.emitProgress(ProgressType.INIT, 'Loading embedding model...', 30);
       await this.embeddings.initialize(
         this.config.embeddingModel,
         this.config.device
       );
-      
-      // Load existing chunks
-      this.emitProgress(ProgressType.INIT, 'Loading knowledge base...', 60);
+
+      this.emitProgress(ProgressType.INIT, 'Loading knowledge base...', 70);
       const chunks = await this.storage.getAllChunks();
       this.retriever.setChunks(chunks);
-      
-      // Initialize LLM in background (non-blocking)
+
+      // Warm up the LLM in the background (non-blocking)
       if (this.config.enableLLM && this.llm) {
-        this.emitProgress(ProgressType.INIT, 'Initializing LLM...', 80);
+        this.emitProgress(ProgressType.LLM_LOAD, 'Initializing LLM in background...', 85);
         this.llm.initialize().catch(error => {
           if (this.config.debug) {
-            console.warn('⚠️  LLM initialization failed, continuing with RAG-only:', error);
+            console.warn('LLM initialization failed, continuing with RAG-only:', error);
           }
         });
       }
-      
+
       this.initialized = true;
-      this.emitProgress(ProgressType.COMPLETE, 'Dhiya ready!', 100);
-      
+      this.emitProgress(ProgressType.COMPLETE, 'Dhiya ready', 100);
+
       if (this.config.debug) {
-        console.log('✅ Dhiya initialized with', chunks.length, 'chunks');
+        console.log('Dhiya initialized with', chunks.length, 'chunks');
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -98,20 +105,24 @@ export class DhiyaClient {
       throw error;
     }
   }
-  
+
   /**
-   * Load knowledge from a source
+   * Load knowledge from a source.
+   *
+   * Document identity: pass `documentId` to manage multiple documents. When
+   * omitted, URL sources use the URL as their id and other sources share the
+   * id 'default' — re-loading without an id replaces the previous unnamed
+   * document instead of duplicating it.
    */
   async loadKnowledge(source: KnowledgeSource): Promise<void> {
     this.ensureInitialized();
-    
+
     try {
-      const docId = source.documentId || `doc-${Date.now()}`;
-      
-      // Parse source into text
+      const docId = source.documentId || (source.type === 'url' ? source.url : 'default');
+
       let text: string;
       let metadata: Record<string, any> = {};
-      
+
       switch (source.type) {
         case 'json':
           text = this.parseJSON(source.data);
@@ -132,63 +143,62 @@ export class DhiyaClient {
         default:
           throw new Error(ERROR_MESSAGES.INVALID_SOURCE);
       }
-      
-      // Check if document changed
+
+      if (!text.trim()) {
+        throw new Error(ERROR_MESSAGES.INVALID_SOURCE);
+      }
+
+      // Skip re-indexing when the content is unchanged
       const checksum = await hashText(text);
       const existingManifest = await this.storage.getManifest(docId);
-      
+
       if (existingManifest && existingManifest.checksum === checksum) {
         if (this.config.debug) {
           console.log(`Document ${docId} unchanged, skipping indexing`);
         }
         return;
       }
-      
-      // Delete old chunks if updating
+
       if (existingManifest) {
         await this.storage.deleteChunksByDocId(docId);
       }
-      
-      // Create chunks
+
       this.emitProgress(ProgressType.INDEXING, `Chunking document ${docId}...`, 0);
       const chunks = createChunks(text, docId, docId, {
         chunkSize: this.config.chunkSize,
         chunkOverlap: this.config.chunkOverlap
       }, metadata);
-      
-      // Embed chunks
+
       this.emitProgress(ProgressType.INDEXING, `Embedding ${chunks.length} chunks...`, 25);
       const embeddings = await this.embeddings.embedBatch(
-        chunks.map(c => c.content),
-        10 // batch size
+        chunks.map(c => c.content)
       );
-      
-      // Attach embeddings
+
       chunks.forEach((chunk, i) => {
         chunk.embedding = embeddings[i];
       });
-      
-      // Save to storage
+
       this.emitProgress(ProgressType.INDEXING, 'Saving to storage...', 90);
       await this.storage.saveChunks(chunks);
-      
-      // Update manifest
+
       await this.storage.saveManifest({
         doc_id: docId,
         checksum,
-        version: '1.0',
+        version: '2.0',
         updated: Date.now(),
         chunkCount: chunks.length
       });
-      
-      // Reload retriever
+
+      // The knowledge base changed: cached answers may now be wrong
+      await this.storage.clearCache();
+
       const allChunks = await this.storage.getAllChunks();
       this.retriever.setChunks(allChunks);
-      
+
       this.emitProgress(ProgressType.COMPLETE, `Indexed ${chunks.length} chunks`, 100);
-      
+
       if (this.config.debug) {
-        console.log(`✅ Indexed ${chunks.length} chunks from ${docId}`);
+        console.log(`Indexed ${chunks.length} chunks from ${docId}`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : ERROR_MESSAGES.INDEXING_FAILED;
@@ -196,173 +206,171 @@ export class DhiyaClient {
       throw error;
     }
   }
-  
+
   /**
-   * Ask a question
+   * Remove a previously loaded document and its chunks.
    */
-  async ask(query: string, options: AskOptions = {}): Promise<Answer> {
+  async removeDocument(docId: string): Promise<void> {
     this.ensureInitialized();
-    
+    await this.storage.deleteChunksByDocId(docId);
+    await this.storage.deleteManifest(docId);
+    await this.storage.clearCache();
+    const allChunks = await this.storage.getAllChunks();
+    this.retriever.setChunks(allChunks);
+  }
+
+  /**
+   * Semantic search over the knowledge base. Returns raw scored chunks
+   * without answer synthesis — useful for custom pipelines.
+   */
+  async search(query: string, options: { topK?: number; threshold?: number } = {}): Promise<SearchResult[]> {
+    this.ensureInitialized();
+
     if (!query.trim()) {
       throw new Error(ERROR_MESSAGES.QUERY_EMPTY);
     }
-    
+
+    const queryEmbedding = await this.embeddings.embed(normalizeQuery(query));
+    return this.retriever.retrieve(queryEmbedding, {
+      topK: options.topK ?? this.config.topK,
+      threshold: options.threshold ?? this.config.similarityThreshold,
+      useDiversity: this.config.useDiversity,
+      diversityThreshold: this.config.diversityThreshold
+    });
+  }
+
+  /**
+   * Ask a question. Streams incremental text via options.onToken when an
+   * LLM provider is active; extractive answers arrive in a single call.
+   */
+  async ask(query: string, options: AskOptions = {}): Promise<Answer> {
+    this.ensureInitialized();
+
+    if (!query.trim()) {
+      throw new Error(ERROR_MESSAGES.QUERY_EMPTY);
+    }
+
     const startTime = Date.now();
     const useLLM = options.enableLLM !== undefined ? options.enableLLM : this.config.enableLLM;
-    
+
     try {
-      // Classify query type
-      const queryType = classifyQuery(query);
-      
-      // Handle conversational queries
-      if (queryType === QueryType.CONVERSATIONAL) {
-        const response = getConversationalResponse(query);
-        return {
-          text: response,
-          sources: [],
-          confidence: 1.0,
-          chunks: [],
-          provider: LLMProvider.NONE,
-          timing: {
-            retrieval: 0,
-            generation: Date.now() - startTime,
-            total: Date.now() - startTime
-          }
-        };
-      }
-      
-      // Handle out of scope queries
-      if (queryType === QueryType.OUT_OF_SCOPE) {
-        const response = getOutOfScopeResponse();
-        return {
-          text: response,
-          sources: [],
-          confidence: 0,
-          chunks: [],
-          provider: LLMProvider.NONE,
-          timing: {
-            retrieval: 0,
-            generation: Date.now() - startTime,
-            total: Date.now() - startTime
-          }
-        };
-      }
-      
-      // Normalize query
-      const normalizedQuery = normalizeQuery(query);
-      
-      // Check cache
-      const cached = await this.storage.getCachedAnswer(normalizedQuery);
-      if (cached) {
-        if (this.config.debug) {
-          console.log('📦 Cache hit for query:', query);
+      // Small-talk short-circuit (full-message matches only; see classifier)
+      if (!this.config.disableQueryClassification) {
+        const queryType = classifyQuery(query);
+
+        if (queryType === QueryType.CONVERSATIONAL || queryType === QueryType.OUT_OF_SCOPE) {
+          const response = queryType === QueryType.CONVERSATIONAL
+            ? getConversationalResponse(query)
+            : getOutOfScopeResponse();
+          options.onToken?.(response);
+          return this.buildShortCircuitAnswer(response, queryType, startTime);
         }
-        return cached.answer;
       }
-      
-  // Embed query
+
+      const normalizedQuery = normalizeQuery(query);
+
+      // Answer cache (skipped when a caller wants streaming from scratch)
+      if (!options.skipCache) {
+        const cached = await this.storage.getCachedAnswer(normalizedQuery, this.config.cacheTTL);
+        if (cached) {
+          if (this.config.debug) {
+            console.log('Cache hit for query:', query);
+          }
+          options.onToken?.(cached.answer.text);
+          return cached.answer;
+        }
+      }
+
+      // Retrieval
       this.emitProgress(ProgressType.RETRIEVAL, 'Searching knowledge base...', 0);
       const queryEmbedding = await this.embeddings.embed(normalizedQuery);
-      
-      // Retrieve relevant chunks
+
       const results = await this.retriever.retrieve(queryEmbedding, {
         topK: options.topK || this.config.topK,
         threshold: this.config.similarityThreshold,
         useDiversity: this.config.useDiversity,
         diversityThreshold: this.config.diversityThreshold
       });
-      
+
       const retrievalTime = Date.now() - startTime;
-      
-      // Synthesize answer from RAG
-  const { text, sources, confidence } = synthesizeAnswer(query, results, {
+
+      // Extractive answer (always computed — it is the LLM fallback too)
+      const synthesized = synthesizeAnswer(query, results, {
         maxSources: 3,
-        includeUrls: true,
-        confidenceThreshold: 0.8
+        noAnswerMessage: this.config.noAnswerMessage
       });
-      
-      let finalText = text;
-      let usedProvider: LLMProvider | undefined = undefined;
-      
-      // Optionally enhance with LLM
-      const kbSize = this.retriever.getChunkCount();
-      const topSimilarity = results[0]?.similarity || 0;
-      const allowLLM = useLLM && this.llm && shouldUseLLM(queryType, useLLM);
-      const llmPermitted = allowLLM &&
-        kbSize >= this.config.minChunksForLLM &&
-        topSimilarity >= (this.config.minLLMSimilarity || 0) &&
-        (!this.config.strictRAG || confidence < PERFORMANCE_THRESHOLDS.highSimilarity);
 
-      // Single answer mode OR definitional queries produce concise answer from top chunk
-      const definitional = /^(what is|who is|define|explain)\b/i.test(query);
-      if ((this.config.singleAnswerMode || definitional) && results.length > 0) {
-        const top = results[0].chunk.content.trim();
-        // First sentence
-        finalText = top.split(/(?<=[.!?])\s+/)[0].trim();
-        const limit = this.config.answerLengthLimit || 320;
-        if (finalText.length > limit) finalText = finalText.slice(0, limit).trimEnd() + '…';
-      }
+      let finalText = synthesized.text;
+      let usedProvider: LLMProvider = LLMProvider.NONE;
 
-      if (!definitional && llmPermitted && results.length > 0) {
-        // Decide if we need LLM enhancement based on confidence
-        const needsEnhancement = confidence < PERFORMANCE_THRESHOLDS.highSimilarity;
-        
-        if (needsEnhancement) {
+      if (this.config.singleAnswerMode && results.length > 0) {
+        // Focused snippet from the top chunk
+        const snippet = extractFocusedSnippet(
+          results[0].chunk.content,
+          queryKeywords(query),
+          this.config.answerLengthLimit
+        );
+        if (snippet) finalText = snippet;
+      } else if (useLLM && this.llm && results.length > 0) {
+        // Grounded LLM answer
+        const topSimilarity = results[0].similarity;
+        const classifiedType = this.config.disableQueryClassification
+          ? QueryType.KNOWLEDGE_BASE
+          : classifyQuery(query);
+        const llmPermitted =
+          shouldUseLLM(classifiedType, true) &&
+          topSimilarity >= this.config.minLLMSimilarity;
+
+        if (llmPermitted) {
           try {
-            this.emitProgress(ProgressType.GENERATION, 'Enhancing with LLM...', 0);
-            
-            // Build trimmed context
+            this.emitProgress(ProgressType.GENERATION, 'Generating answer...', 0);
+
             let context = results.slice(0, 3).map(r => r.chunk.content).join('\n\n');
             if (context.length > this.config.maxContextChars) {
               context = context.slice(0, this.config.maxContextChars) + '...';
             }
             const llmPrompt = createLLMPrompt(query, context, options.conversationHistory);
-            
-            const timeout = confidence < PERFORMANCE_THRESHOLDS.mediumSimilarity
-              ? PERFORMANCE_THRESHOLDS.llmTimeoutLow
-              : PERFORMANCE_THRESHOLDS.llmTimeoutMedium;
-            
-            const enhancedText = await (this.llm as any).generate(llmPrompt, {
+
+            const generated = await this.llm.generate(llmPrompt, {
               context,
-              timeout
+              timeout: options.timeout,
+              onToken: options.onToken
             });
-            
-            if (enhancedText && enhancedText.length > 50) {
-              finalText = enhancedText;
-              usedProvider = (this.llm as any).getActiveProvider() || undefined;
-              
-              if (this.config.debug) {
-                console.log(`✨ Enhanced with ${usedProvider}`);
+
+            if (generated && generated.trim().length >= 2) {
+              finalText = generated.trim();
+              usedProvider = this.llm.getActiveProvider() || LLMProvider.NONE;
+
+              if (this.config.debug && usedProvider !== LLMProvider.NONE) {
+                console.log(`Answer generated with ${usedProvider}`);
               }
             }
           } catch (error) {
             if (this.config.debug) {
-              console.warn('⚠️  LLM enhancement failed, using RAG-only answer:', error);
+              console.warn('LLM generation failed, using extractive answer:', error);
             }
-            // Continue with RAG-only answer
+            // fall through to the extractive answer
           }
         }
       }
-      
-      // Extract URLs and format
-      const urls = extractUrls(results.map(r => r.chunk.content).join(' '));
-  const formattedText = usedProvider || this.config.singleAnswerMode ? finalText : formatAnswer(finalText, sources, urls);
-      
-      // Add source links even for LLM-enhanced answers
-      if (usedProvider && urls.length > 0) {
-        const linkSection = '\n\n**Related links:**\n' + urls.slice(0, 5).map(url => `- ${url}`).join('\n');
-        finalText = formattedText + linkSection;
-      } else {
-        finalText = formattedText;
+
+      // Append related links found in the retrieved chunks
+      const urls = results.length > 0 ? extractAllUrls(results.slice(0, 3)) : [];
+      finalText = formatAnswer(finalText, synthesized.sources, urls);
+
+      // Callers streaming via onToken already received LLM tokens; for
+      // extractive answers deliver the full text in one call.
+      if (usedProvider === LLMProvider.NONE) {
+        options.onToken?.(finalText);
       }
-      
+
       const generationTime = Date.now() - startTime - retrievalTime;
       const totalTime = Date.now() - startTime;
-      
+
       const answer: Answer = {
-        text: usedProvider ? finalText : formattedText,
-        sources: this.config.singleAnswerMode && sources.length > 0 ? [sources[0]] : sources,
-        confidence,
+        text: finalText,
+        sources: synthesized.sources,
+        confidence: synthesized.confidence,
         chunks: results,
         provider: usedProvider,
         timing: {
@@ -370,21 +378,21 @@ export class DhiyaClient {
           generation: generationTime,
           total: totalTime
         },
-        topSource: sources[0]
+        topSource: synthesized.sources[0]
       };
-      
-      // Cache answer
-      await this.storage.cacheAnswer(normalizedQuery, {
-        query: normalizedQuery,
-        answer,
-        timestamp: Date.now()
-      });
-      
-      // Maintain cache size
-      await this.storage.limitCacheSize(this.config.maxCacheSize);
-      
+
+      // Cache only useful answers (never the "no information" fallback)
+      if (!options.skipCache && results.length > 0 && synthesized.confidence > 0) {
+        await this.storage.cacheAnswer(normalizedQuery, {
+          query: normalizedQuery,
+          answer: this.slimAnswerForCache(answer),
+          timestamp: Date.now()
+        });
+        await this.storage.limitCacheSize(this.config.maxCacheSize);
+      }
+
       this.emitProgress(ProgressType.COMPLETE, 'Answer generated', 100);
-      
+
       return answer;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to generate answer';
@@ -392,7 +400,7 @@ export class DhiyaClient {
       throw error;
     }
   }
-  
+
   /**
    * Get current status
    */
@@ -402,7 +410,7 @@ export class DhiyaClient {
       cacheSize: 0,
       documentCount: 0
     };
-    
+
     return {
       initialized: this.initialized,
       embedding: {
@@ -424,25 +432,25 @@ export class DhiyaClient {
       knowledgeBase: {
         documentCount: stats.documentCount,
         chunkCount: stats.chunkCount,
-        sourceCount: stats.documentCount,  // Use documentCount as proxy for sources
+        sourceCount: stats.documentCount,
         indexed: stats.chunkCount > 0
       }
     };
   }
-  
+
   /**
-   * Clear all knowledge
+   * Clear all knowledge (chunks, manifests, and cached answers)
    */
   async clear(): Promise<void> {
     this.ensureInitialized();
     await this.storage.clearAll();
     this.retriever.setChunks([]);
-    
+
     if (this.config.debug) {
-      console.log('🗑️ Cleared all knowledge');
+      console.log('Cleared all knowledge');
     }
   }
-  
+
   /**
    * Cleanup resources
    */
@@ -454,66 +462,107 @@ export class DhiyaClient {
     await this.storage.close();
     this.initialized = false;
   }
-  
+
   // Private helpers
-  
+
+  private buildShortCircuitAnswer(text: string, queryType: QueryType, startTime: number): Answer {
+    return {
+      text,
+      sources: [],
+      confidence: queryType === QueryType.CONVERSATIONAL ? 1.0 : 0,
+      chunks: [],
+      provider: LLMProvider.NONE,
+      timing: {
+        retrieval: 0,
+        generation: Date.now() - startTime,
+        total: Date.now() - startTime
+      }
+    };
+  }
+
+  /**
+   * Strip heavy fields (embeddings, full chunk bodies) before caching.
+   */
+  private slimAnswerForCache(answer: Answer): Answer {
+    return {
+      ...answer,
+      chunks: answer.chunks.map(result => ({
+        similarity: result.similarity,
+        chunk: {
+          id: result.chunk.id,
+          doc_id: result.chunk.doc_id,
+          source: result.chunk.source,
+          content: result.chunk.content,
+          metadata: result.chunk.metadata
+          // embedding intentionally omitted
+        }
+      })),
+      sources: answer.sources.map((s: Source) => ({ ...s }))
+    };
+  }
+
   private ensureInitialized(): void {
     if (!this.initialized) {
       throw new Error(ERROR_MESSAGES.NOT_INITIALIZED);
     }
   }
-  
+
   private emitProgress(type: ProgressType, message: string, progress?: number): void {
     if (this.config.onProgress) {
       this.config.onProgress({ type, message, progress });
     }
   }
-  
+
   private parseJSON(data: object[] | object): string {
     if (Array.isArray(data)) {
       return data.map(item => this.jsonToText(item)).join('\n\n');
     }
     return this.jsonToText(data);
   }
-  
+
   private jsonToText(obj: any): string {
     if (typeof obj === 'string') return obj;
-    if (typeof obj !== 'object') return String(obj);
-    
+    if (typeof obj !== 'object' || obj === null) return String(obj);
+
     let text = '';
-    
-    // Handle common KB formats
-    if ('content' in obj) text += obj.content + '\n';
+
     if ('title' in obj) text += obj.title + '\n';
+    if ('content' in obj) text += obj.content + '\n';
     if ('description' in obj) text += obj.description + '\n';
-    
-    // Handle entries array
+
     if ('entries' in obj && Array.isArray(obj.entries)) {
       text += obj.entries.map((e: any) => this.jsonToText(e)).join('\n\n');
     }
-    
+
     return text.trim();
   }
-  
+
   private async fetchURL(url: string, selector?: string): Promise<string> {
     try {
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-      
+
       const html = await response.text();
-      
-      if (selector) {
-        // Parse and extract content (simple implementation)
+
+      if (typeof DOMParser !== 'undefined') {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
-        const element = doc.querySelector(selector);
-        return element?.textContent?.trim() || '';
+
+        // Never index script/style/head content
+        doc.querySelectorAll('script, style, noscript, template').forEach(el => el.remove());
+
+        const root = selector ? doc.querySelector(selector) : doc.body;
+        return root?.textContent?.replace(/\s+\n/g, '\n').trim() || '';
       }
-      
-      // Extract text from HTML (simple)
-      return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+      // Non-DOM environment fallback: strip tags after removing script/style blocks
+      return html
+        .replace(/<(script|style|noscript|template)[\s\S]*?<\/\1>/gi, ' ')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
     } catch (error) {
       throw new Error(`${ERROR_MESSAGES.NETWORK_ERROR}: ${error}`);
     }

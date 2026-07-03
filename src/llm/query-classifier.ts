@@ -1,12 +1,18 @@
 /**
- * Query type classification for smart LLM usage
+ * Query type classification.
+ *
+ * Deliberately conservative: only queries that are entirely small talk
+ * (greetings, thanks, goodbyes) are classified as conversational. Everything
+ * else goes through retrieval — if the knowledge base has nothing relevant,
+ * low similarity already produces an honest "no answer" response, which is
+ * far safer than keyword-based refusal.
  */
 
 export enum QueryType {
-  KNOWLEDGE_BASE = 'knowledge-base',  // Questions about indexed content
-  GENERAL = 'general',                // General questions
-  CONVERSATIONAL = 'conversational',  // Greetings, thanks, etc.
-  OUT_OF_SCOPE = 'out-of-scope'      // Unrelated queries
+  KNOWLEDGE_BASE = 'knowledge-base', // Questions about indexed content
+  GENERAL = 'general',               // General questions
+  CONVERSATIONAL = 'conversational', // Greetings, thanks, etc.
+  OUT_OF_SCOPE = 'out-of-scope'      // Direct action requests we cannot do
 }
 
 /**
@@ -14,109 +20,66 @@ export enum QueryType {
  */
 export function classifyQuery(query: string): QueryType {
   const lowerQuery = query.toLowerCase().trim();
-  
-  // Conversational patterns
+
   if (isConversational(lowerQuery)) {
     return QueryType.CONVERSATIONAL;
   }
-  
-  // Out of scope patterns
+
   if (isOutOfScope(lowerQuery)) {
     return QueryType.OUT_OF_SCOPE;
   }
-  
-  // Question patterns suggest knowledge base query
+
   if (isQuestionPattern(lowerQuery)) {
     return QueryType.KNOWLEDGE_BASE;
   }
-  
-  // Default to general
+
   return QueryType.GENERAL;
 }
 
-/**
- * Check if query is conversational
- */
-export function isConversational(query: string): boolean {
-  const conversationalPatterns = [
-    /^(hi|hello|hey|greetings|good morning|good afternoon|good evening)/,
-    /(how are you|what's up|whats up)/,
-    /(thanks|thank you|thx|ty)/,
-    /^(bye|goodbye|see you|farewell)/,
-    /^(ok|okay|sure|alright|cool|great|awesome)/,
-    /^(yes|yeah|yep|no|nope|nah)/
-  ];
-  
-  return conversationalPatterns.some(pattern => pattern.test(query));
-}
+/** Terminal punctuation/emoji tolerated around small talk. */
+const TRAILER = "[\\s!.,?'\\u{1F300}-\\u{1FAFF}]*";
+
+const CONVERSATIONAL_PATTERNS: RegExp[] = [
+  // Pure greetings: "hi", "hello there", "hey!", "good morning"
+  new RegExp(`^(hi|hii+|hello|hey|yo|greetings|good (morning|afternoon|evening))( there)?( dhiya)?${TRAILER}$`, 'iu'),
+  // "how are you", "what's up"
+  new RegExp(`^(how are you|how's it going|what's up|whats up|sup)${TRAILER}$`, 'iu'),
+  // Pure thanks: "thanks", "thank you so much", "thx"
+  new RegExp(`^(ok(ay)?[\\s,]*)?(thanks|thank you|thankyou|thx|ty|tysm)( a lot| so much| very much)?${TRAILER}$`, 'iu'),
+  // Goodbyes
+  new RegExp(`^(bye|goodbye|see you|see ya|farewell|good night)${TRAILER}$`, 'iu'),
+  // Bare acknowledgements: "ok", "cool", "great", "yes", "no"
+  new RegExp(`^(ok|okay|sure|alright|cool|great|awesome|nice|perfect|got it|yes|yeah|yep|no|nope|nah)${TRAILER}$`, 'iu')
+];
 
 /**
- * Check if query is out of scope
+ * Check if the ENTIRE query is small talk. Substrings never match, so
+ * questions like "what is the warranty?" or "history of the company" are
+ * always routed to retrieval.
+ */
+export function isConversational(query: string): boolean {
+  const trimmed = query.trim();
+  if (!trimmed) return false;
+
+  // Small talk is short; anything long deserves retrieval
+  if (trimmed.split(/\s+/).length > 6) return false;
+
+  return CONVERSATIONAL_PATTERNS.some(pattern => pattern.test(trimmed));
+}
+
+const OUT_OF_SCOPE_PATTERNS: RegExp[] = [
+  // Direct action requests a client-side chatbot cannot perform
+  /^(please\s+)?(send|write|compose)\s+(an?\s+)?(email|e-mail|text message|sms)\b/i,
+  /^(please\s+)?(call|phone|dial)\s+/i,
+  /^(please\s+)?(open|launch|start)\s+(a\s+)?(file|program|app|application)\b/i
+];
+
+/**
+ * Check if the query is a direct action request that cannot be served.
+ * Informational questions are never out of scope — retrieval decides.
  */
 export function isOutOfScope(query: string): boolean {
-  // Time-sensitive queries
-  const timePatterns = [
-    /what time is it/i,
-    /what'?s the time/i,
-    /current time/i,
-    /today'?s date/i,
-    /what'?s today'?s date/i,
-    /what is today'?s date/i,
-    /what date is it/i
-  ];
-  
-  // Weather queries
-  const weatherPatterns = [
-    /weather/i,
-    /raining/i,
-    /forecast/i,
-    /temperature/i
-  ];
-  
-  // Action requests
-  const actionPatterns = [
-    /send (an? )?(email|message)/i,
-    /call someone/i,
-    /make (a )?call/i,
-    /open (a )?file/i,
-    /start (a )?program/i
-  ];
-  
-  // Real-time info
-  const realtimePatterns = [
-    /stock price/i,
-    /current news/i,
-    /latest news/i,
-    /breaking news/i
-  ];
-  
-  // Check all out-of-scope patterns first
-  const isOutOfScopeQuery = timePatterns.some(pattern => pattern.test(query)) ||
-         weatherPatterns.some(pattern => pattern.test(query)) ||
-         actionPatterns.some(pattern => pattern.test(query)) ||
-         realtimePatterns.some(pattern => pattern.test(query));
-  
-  if (!isOutOfScopeQuery) {
-    return false; // Not out of scope
-  }
-  
-  // However, "explain the weather system" is a knowledge query, not out of scope
-  // Check if it's actually asking for explanation/knowledge
-  const knowledgeIndicators = [
-    /explain (the|a)?/i,
-    /how does (the|a)?/i,
-    /tell me about (the|a)?/i,
-    /describe (the|a)?/i,
-    /what is (the|a)? .+ (system|concept|theory|principle)/i
-  ];
-  
-  // Check if it's a knowledge question about the topic (override)
-  const hasKnowledgeIndicator = knowledgeIndicators.some(pattern => pattern.test(query));
-  if (hasKnowledgeIndicator) {
-    return false; // It's a knowledge query, not out of scope
-  }
-  
-  return true;
+  return OUT_OF_SCOPE_PATTERNS.some(pattern => pattern.test(query.trim()));
 }
 
 /**
@@ -126,7 +89,7 @@ function isQuestionPattern(query: string): boolean {
   const questionWords = ['what', 'who', 'where', 'when', 'why', 'how', 'which', 'can', 'does', 'is', 'are'];
   const startsWithQuestion = questionWords.some(word => query.startsWith(word + ' '));
   const endsWithQuestion = query.endsWith('?');
-  
+
   return startsWithQuestion || endsWithQuestion;
 }
 
@@ -135,16 +98,14 @@ function isQuestionPattern(query: string): boolean {
  */
 export function shouldUseLLM(queryType: QueryType, enableLLM: boolean): boolean {
   if (!enableLLM) return false;
-  
+
   switch (queryType) {
     case QueryType.KNOWLEDGE_BASE:
-      return true; // Use LLM to enhance RAG results
     case QueryType.GENERAL:
-      return true; // Use LLM for general questions
+      return true;
     case QueryType.CONVERSATIONAL:
-      return false; // Use simple responses
     case QueryType.OUT_OF_SCOPE:
-      return false; // Politely decline
+      return false;
     default:
       return false;
   }
@@ -155,29 +116,25 @@ export function shouldUseLLM(queryType: QueryType, enableLLM: boolean): boolean 
  */
 export function getConversationalResponse(query: string): string {
   const lowerQuery = query.toLowerCase().trim();
-  
-  if (/^(hi|hello|hey)/.test(lowerQuery)) {
-    return "Hello! How can I help you today?";
-  }
-  
-  if (/^(thanks|thank you)/.test(lowerQuery)) {
+
+  if (/^(thanks|thank you|thankyou|thx|ty|tysm)\b/.test(lowerQuery) || /\b(thanks|thank you)\b/.test(lowerQuery)) {
     return "You're welcome! Feel free to ask if you have more questions.";
   }
-  
-  if (/^(bye|goodbye)/.test(lowerQuery)) {
-    return "Goodbye! Have a great day!";
+
+  if (/^(bye|goodbye|see you|see ya|farewell|good night)\b/.test(lowerQuery)) {
+    return 'Goodbye! Have a great day!';
   }
-  
-  if (/^(ok|okay|sure|alright)/.test(lowerQuery)) {
-    return "Great! Anything else I can help with?";
+
+  if (/^(ok|okay|sure|alright|cool|great|awesome|nice|perfect|got it|yes|yeah|yep|no|nope|nah)\b/.test(lowerQuery)) {
+    return 'Great! Anything else I can help with?';
   }
-  
-  return "I'm here to help! What would you like to know?";
+
+  return 'Hello! Ask me anything about the knowledge base.';
 }
 
 /**
  * Get out of scope response
  */
 export function getOutOfScopeResponse(): string {
-  return "I'm focused on answering questions about the knowledge base. I can't help with that particular topic, but feel free to ask me anything within my domain!";
+  return "I can only answer questions about the knowledge base — I can't perform actions like sending messages or opening apps.";
 }
