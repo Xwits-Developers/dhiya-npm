@@ -1,12 +1,13 @@
 /**
  * Text chunking utilities.
  *
- * Strategy: split the cleaned text into paragraphs, split oversized
- * paragraphs into sentences (and oversized sentences by words), then pack
- * the resulting units greedily into chunks up to chunkSize with a
- * sentence-aligned overlap carried between consecutive chunks. Content is
- * never dropped and the algorithm consumes one unit per step, so it always
- * terminates regardless of configuration.
+ * Strategy: paragraphs are the retrieval unit. Each paragraph becomes its
+ * own chunk — semantically coherent chunks retrieve far better than packed
+ * multi-topic blocks. Very short paragraphs (headings, list fragments) are
+ * merged forward into the next paragraph, and paragraphs longer than
+ * chunkSize are split on sentence boundaries with a sentence-aligned
+ * overlap. Content is never dropped and every step consumes input, so
+ * chunking terminates for any configuration.
  */
 
 import { Chunk } from '../core/types.js';
@@ -16,6 +17,7 @@ export interface ChunkOptions {
   chunkSize?: number;
   overlap?: number;
   chunkOverlap?: number;
+  /** Paragraphs shorter than this merge into the following paragraph. */
   minChunkSize?: number;
   maxChunkSize?: number;
   metadata?: Record<string, any>;
@@ -32,6 +34,9 @@ export function chunkText(
   const requestedOverlap = options.overlap ?? options.chunkOverlap ?? 120;
   // Overlap above half the chunk size cannot make progress; clamp it.
   const chunkOverlap = Math.max(0, Math.min(requestedOverlap, Math.floor(chunkSize / 2)));
+  // Threshold for forward-merging heading-like fragments; a full sentence
+  // is a legitimate standalone chunk.
+  const minUnitSize = Math.min(options.minChunkSize ?? 40, chunkSize);
 
   const cleanedText = cleanText(text);
 
@@ -39,17 +44,74 @@ export function chunkText(
     return [];
   }
 
-  if (cleanedText.length <= chunkSize) {
-    return [makeChunk(cleanedText, 0, options.metadata)];
+  // 1. Paragraph units, with short paragraphs merged forward
+  const paragraphs = cleanedText.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+  const units: string[] = [];
+  let buffer = '';
+
+  for (const paragraph of paragraphs) {
+    buffer = buffer ? `${buffer}\n\n${paragraph}` : paragraph;
+    if (buffer.length >= minUnitSize) {
+      units.push(buffer);
+      buffer = '';
+    }
+  }
+  if (buffer) {
+    // Trailing short paragraph: attach to the previous unit when possible
+    if (units.length > 0 && units[units.length - 1].length + buffer.length + 2 <= chunkSize) {
+      units[units.length - 1] += `\n\n${buffer}`;
+    } else {
+      units.push(buffer);
+    }
   }
 
-  const units = splitIntoUnits(cleanedText, chunkSize);
-
+  // 2. Split any unit that exceeds chunkSize on sentence boundaries
   const contents: string[] = [];
+  for (const unit of units) {
+    if (unit.length <= chunkSize) {
+      contents.push(unit);
+    } else {
+      contents.push(...packSentences(unit, chunkSize, chunkOverlap));
+    }
+  }
+
+  return contents.map((content, index) =>
+    makeChunk(content, index, options.metadata, contents.length)
+  );
+}
+
+/**
+ * Pack the sentences of one oversized paragraph into chunks up to chunkSize,
+ * carrying a sentence-aligned overlap between consecutive chunks.
+ */
+function packSentences(paragraph: string, chunkSize: number, chunkOverlap: number): string[] {
+  const sentences: string[] = [];
+
+  for (const sentence of paragraph.split(/(?<=[.!?])\s+/)) {
+    if (!sentence) continue;
+    if (sentence.length <= chunkSize) {
+      sentences.push(sentence);
+      continue;
+    }
+
+    // Sentence longer than a whole chunk: hard-split on words
+    let remaining = sentence;
+    while (remaining.length > chunkSize) {
+      let cut = remaining.lastIndexOf(' ', chunkSize);
+      if (cut < chunkSize / 2) cut = chunkSize; // no usable space; hard cut
+      sentences.push(remaining.slice(0, cut).trim());
+      remaining = remaining.slice(cut).trim();
+    }
+    if (remaining) {
+      sentences.push(remaining);
+    }
+  }
+
+  const chunks: string[] = [];
   let current = '';
 
-  for (const unit of units) {
-    const candidate = current ? `${current}${unit.joiner}${unit.text}` : unit.text;
+  for (const sentence of sentences) {
+    const candidate = current ? `${current} ${sentence}` : sentence;
 
     if (candidate.length <= chunkSize) {
       current = candidate;
@@ -57,73 +119,22 @@ export function chunkText(
     }
 
     if (current) {
-      contents.push(current);
-      // Carry a sentence-aligned tail of the previous chunk as overlap
+      chunks.push(current);
       const tail = chunkOverlap > 0 ? overlapTail(current, chunkOverlap) : '';
-      current = tail ? `${tail} ${unit.text}` : unit.text;
-      // If the unit alone (plus overlap) still exceeds chunkSize, flush the
-      // overlap and keep only the unit; units are pre-split to fit chunkSize.
+      current = tail ? `${tail} ${sentence}` : sentence;
       if (current.length > chunkSize) {
-        current = unit.text;
+        current = sentence; // overlap did not fit alongside the sentence
       }
     } else {
-      current = unit.text;
+      current = sentence;
     }
   }
 
   if (current.trim()) {
-    contents.push(current.trim());
+    chunks.push(current.trim());
   }
 
-  return contents.map((content, index) => makeChunk(content, index, options.metadata, contents.length));
-}
-
-interface TextUnit {
-  text: string;
-  /** Separator to use when appending to the current chunk. */
-  joiner: string;
-}
-
-/**
- * Break text into paragraph/sentence/word units no longer than chunkSize.
- */
-function splitIntoUnits(text: string, chunkSize: number): TextUnit[] {
-  const units: TextUnit[] = [];
-
-  for (const paragraph of text.split(/\n{2,}/)) {
-    const trimmed = paragraph.trim();
-    if (!trimmed) continue;
-
-    if (trimmed.length <= chunkSize) {
-      units.push({ text: trimmed, joiner: '\n\n' });
-      continue;
-    }
-
-    // Paragraph too large: split into sentences
-    const sentences = trimmed.split(/(?<=[.!?])\s+/);
-    for (const sentence of sentences) {
-      if (!sentence) continue;
-
-      if (sentence.length <= chunkSize) {
-        units.push({ text: sentence, joiner: ' ' });
-        continue;
-      }
-
-      // Sentence too large: hard-split on words
-      let remaining = sentence;
-      while (remaining.length > chunkSize) {
-        let cut = remaining.lastIndexOf(' ', chunkSize);
-        if (cut < chunkSize / 2) cut = chunkSize; // no usable space; hard cut
-        units.push({ text: remaining.slice(0, cut).trim(), joiner: ' ' });
-        remaining = remaining.slice(cut).trim();
-      }
-      if (remaining) {
-        units.push({ text: remaining, joiner: ' ' });
-      }
-    }
-  }
-
-  return units;
+  return chunks;
 }
 
 /**
@@ -133,14 +144,12 @@ function splitIntoUnits(text: string, chunkSize: number): TextUnit[] {
 function overlapTail(text: string, overlap: number): string {
   const window = text.slice(-overlap);
 
-  // Prefer starting at a sentence boundary inside the window
   const sentenceStart = window.search(/(?<=[.!?])\s+/);
   if (sentenceStart !== -1) {
     const tail = window.slice(sentenceStart).trim();
     if (tail) return tail;
   }
 
-  // Fall back to a word boundary
   const wordStart = window.indexOf(' ');
   if (wordStart !== -1 && wordStart < window.length - 1) {
     return window.slice(wordStart + 1).trim();

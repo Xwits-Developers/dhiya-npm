@@ -45,6 +45,14 @@ support, and packaging that actually loads everywhere.
 - **Default local LLM is `onnx-community/Qwen2.5-0.5B-Instruct`** (chat-tuned,
   grounded prompting) replacing DistilGPT-2, a 2019 base model that produced
   hallucinated "enhancements".
+- **Paragraph-granular chunking.** Paragraphs are now the retrieval unit
+  (heading-like fragments merge forward; oversized paragraphs split on
+  sentences with overlap) instead of packing unrelated topics into one
+  chunk, which diluted cosine similarity enough to miss obvious questions.
+  Verified in-browser with real MiniLM embeddings: FAQ-style KBs went from
+  1 diluted chunk (missed queries) to per-topic chunks answering correctly.
+  Existing indexes re-chunk automatically on the next `loadKnowledge` via an
+  index-version stamp in the document manifest.
 - **Upgraded to `@huggingface/transformers` v4** (from the unmaintained
   `@xenova/transformers` v2): embeddings genuinely run on WebGPU with WASM
   fallback — previously the selected device was never applied and the "WebGPU
@@ -59,6 +67,11 @@ support, and packaging that actually loads everywhere.
 - Requires Node >= 18 for tooling; browsers are the runtime target.
 
 ### Added
+- **Chrome Summarizer API provider** (`chrome-summarizer`): on-device answers
+  on stable Chrome 138+ web pages (where the Prompt API is extensions-only),
+  answering as question-focused summaries of the retrieved context — no
+  Transformers.js model download needed when Gemini Nano is present. Default
+  fallback order is now `chrome-ai` → `chrome-summarizer` → `transformers`.
 - **`<dhiya-chat>` web component** (`dhiya-npm/widget`): a complete floating
   chat UI configurable via attributes, with inline or URL knowledge sources —
   one script tag to integrate on any site.

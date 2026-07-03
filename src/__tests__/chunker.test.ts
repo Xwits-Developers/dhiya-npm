@@ -48,6 +48,31 @@ describe('Chunker', () => {
     expect(chunkText('   \n\n  ')).toEqual([]);
   });
 
+  it('indexes each substantial paragraph as its own chunk (FAQ-style KBs)', () => {
+    const kb = [
+      'The warranty for Acme gadgets covers manufacturing defects for two years from purchase.',
+      'Refunds can be requested within 30 days of purchase for a full reimbursement.',
+      'Acme support is available 24/7 via chat and responds within five minutes.'
+    ].join('\n\n');
+
+    const chunks = chunkText(kb, { chunkSize: 900 });
+
+    // Distinct topics must not be packed into one diluted chunk
+    expect(chunks).toHaveLength(3);
+    expect(chunks[0].content).toContain('warranty');
+    expect(chunks[1].content).toContain('Refunds');
+    expect(chunks[2].content).toContain('support');
+  });
+
+  it('merges short heading-like paragraphs into the following paragraph', () => {
+    const text = 'Warranty\n\nAcme gadgets are covered for two years against manufacturing defects.';
+    const chunks = chunkText(text, { chunkSize: 900 });
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].content).toContain('Warranty');
+    expect(chunks[0].content).toContain('two years');
+  });
+
   it('should split on paragraph boundaries when possible', () => {
     const para1 = 'First topic sentence one. First topic sentence two.';
     const para2 = 'Second topic sentence one. Second topic sentence two.';

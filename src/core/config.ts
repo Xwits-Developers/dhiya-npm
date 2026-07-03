@@ -22,9 +22,11 @@ export const DEFAULT_CONFIG: Required<Omit<DhiyaConfig, 'onProgress' | 'onError'
   chunkSize: 900,
   chunkOverlap: 120,
 
-  // Retrieval
+  // Retrieval. The floor is deliberately permissive: chunks holding several
+  // topics dilute cosine scores, and both the grounded LLM prompt and the
+  // keyword-scored extractive path cope well with borderline matches.
   topK: 5,
-  similarityThreshold: 0.25,
+  similarityThreshold: 0.2,
   useDiversity: true,
   diversityThreshold: 0.95,
 
@@ -34,10 +36,14 @@ export const DEFAULT_CONFIG: Required<Omit<DhiyaConfig, 'onProgress' | 'onError'
   transformersModel: DEFAULT_TRANSFORMERS_OPTIONS.model,
   transformersOptions: { ...DEFAULT_TRANSFORMERS_OPTIONS },
   chromeAIOptions: { ...DEFAULT_CHROME_AI_OPTIONS },
-  llmFallbackOrder: [LLMProvider.CHROME_AI, LLMProvider.TRANSFORMERS],
+  llmFallbackOrder: [
+    LLMProvider.CHROME_AI,
+    LLMProvider.CHROME_SUMMARIZER,
+    LLMProvider.TRANSFORMERS
+  ],
 
   // Answer quality
-  minLLMSimilarity: 0.3,
+  minLLMSimilarity: 0.25,
   maxContextChars: 4000,
   singleAnswerMode: false,
   answerLengthLimit: 320,

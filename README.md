@@ -18,14 +18,15 @@ npm install dhiya-npm
 3. **Store** — chunks + vectors persist in IndexedDB, so the index survives reloads and works offline.
 4. **Answer** — questions are embedded, matched by cosine similarity, and answered by a **local LLM grounded in the retrieved chunks**, with token streaming. Without an LLM, Dhiya falls back to extractive answers.
 
-Two local LLM providers, tried in order:
+Three local answer providers, tried in order (all on-device — see [Chrome's built-in AI APIs](https://developer.chrome.com/docs/ai/built-in-apis)):
 
-| Provider | What it is | Notes |
-|----------|------------|-------|
-| `chrome-ai` | Chrome's built-in Gemini Nano via the [Prompt API](https://developer.chrome.com/docs/ai/prompt-api) (`LanguageModel`) | Chrome 138+ on supported hardware; no extra download if the browser has the model |
-| `transformers` | An ONNX instruct model via Transformers.js (default `onnx-community/Qwen2.5-0.5B-Instruct`, ~350 MB q4, cached after first load) | Works in any modern browser; fastest with WebGPU |
+| Provider | What it is | Where it works |
+|----------|------------|----------------|
+| `chrome-ai` | Gemini Nano via the [Prompt API](https://developer.chrome.com/docs/ai/prompt-api) (`LanguageModel`) — best quality | Stable in Chrome **extensions** (138+); on regular web pages via origin trial. Used only when the model is already on the device. |
+| `chrome-summarizer` | Gemini Nano via the [Summarizer API](https://developer.chrome.com/docs/ai/summarizer-api) — answers as question-focused summaries of the retrieved context | **Stable Chrome 138+ web pages.** No extra download when Nano is present. |
+| `transformers` | An ONNX instruct model via Transformers.js (default `onnx-community/Qwen2.5-0.5B-Instruct`, ~350 MB q4, cached after first load) | Any modern browser (Chrome, Edge, Firefox, Safari); fastest with WebGPU |
 
-Set `enableLLM: false` for a lightweight, extractive-only setup (~25 MB total).
+Whichever is unavailable is skipped automatically, and if none can run Dhiya still answers extractively. Set `enableLLM: false` for the lightweight, extractive-only setup (~25 MB total).
 
 ## Quick start
 
@@ -99,12 +100,12 @@ const client = new DhiyaClient({
   device: 'auto',                   // 'webgpu' | 'wasm' | 'auto'
   enableLLM: true,
   transformersModel: 'onnx-community/Qwen2.5-0.5B-Instruct',
-  llmFallbackOrder: ['chrome-ai', 'transformers'],
+  llmFallbackOrder: ['chrome-ai', 'chrome-summarizer', 'transformers'],
   // retrieval & answers
-  chunkSize: 900,
+  chunkSize: 900,                   // paragraphs are the retrieval unit; this caps oversized ones
   topK: 5,
-  similarityThreshold: 0.25,
-  minLLMSimilarity: 0.3,            // below this, skip the LLM (avoids hallucination)
+  similarityThreshold: 0.2,
+  minLLMSimilarity: 0.25,           // below this, skip the LLM (avoids hallucination)
   noAnswerMessage: "I don't have enough information in my knowledge base to answer that.",
   singleAnswerMode: false,          // true = short focused snippet, no LLM
   // hooks
@@ -117,7 +118,7 @@ const client = new DhiyaClient({
 
 ## Browser support
 
-- **Chrome / Edge** — WebGPU embeddings + optional Chrome built-in AI.
+- **Chrome / Edge** — WebGPU embeddings + Chrome built-in AI (Summarizer on stable web pages; Prompt API in extensions/origin trial).
 - **Firefox / Safari 16+** — WASM embeddings; LLM answers via Transformers.js.
 - Requires IndexedDB, so Dhiya runs **in the browser only**. In SSR frameworks (Next.js etc.) create the client inside a client component / `useEffect`; importing the package on the server is safe (`initialize()` throws a clear error there).
 - Model files are fetched from the Hugging Face Hub on first use and cached by the browser. For fully offline or air-gapped deployments, self-host the models and point Transformers.js at them via `transformersOptions`.

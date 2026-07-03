@@ -40,6 +40,22 @@ function makeTextGenerator(reply: string) {
   ];
 }
 
+function installSummarizerMock(availability = 'available') {
+  const summarizeFn = vi.fn(async () => 'summarized answer');
+  const createFn = vi.fn(async () => ({
+    summarize: summarizeFn,
+    summarizeStreaming: () => {
+      throw new Error('not used in this test');
+    },
+    destroy: vi.fn()
+  }));
+  (globalThis as any).Summarizer = {
+    availability: vi.fn(async () => availability),
+    create: createFn
+  };
+  return { summarizeFn, createFn };
+}
+
 describe('ChromeAIProvider (LanguageModel API)', () => {
   afterEach(() => {
     delete (globalThis as any).LanguageModel;
@@ -48,6 +64,13 @@ describe('ChromeAIProvider (LanguageModel API)', () => {
   it('is unavailable when the LanguageModel global is missing', async () => {
     const provider = new ChromeAIProvider();
     expect(await provider.isAvailable()).toBe(false);
+  });
+
+  it('is unavailable while the model is still downloadable (needs user gesture)', async () => {
+    installLanguageModelMock('downloadable');
+    const provider = new ChromeAIProvider();
+    expect(await provider.isAvailable()).toBe(false);
+    await expect(provider.initialize()).rejects.toThrow(/not ready/);
   });
 
   it('is available and generates when LanguageModel is present', async () => {
@@ -74,10 +97,39 @@ describe('LLMManager', () => {
   beforeEach(() => {
     pipelineMock.mockReset();
     delete (globalThis as any).LanguageModel;
+    delete (globalThis as any).Summarizer;
   });
 
   afterEach(() => {
     delete (globalThis as any).LanguageModel;
+    delete (globalThis as any).Summarizer;
+  });
+
+  it('falls back to the Summarizer API before Transformers.js', async () => {
+    // Prompt API absent, Summarizer available (the stable-Chrome web reality)
+    installSummarizerMock('available');
+    pipelineMock.mockResolvedValue(makeTextGenerator('should not be used'));
+
+    const manager = new LLMManager({});
+    await manager.initialize();
+
+    expect(manager.getActiveProvider()).toBe(LLMProvider.CHROME_SUMMARIZER);
+    const answer = await manager.generate('prompt', {
+      context: 'The warranty lasts two years.',
+      query: 'How long is the warranty?'
+    });
+    expect(answer).toBe('summarized answer');
+    expect(pipelineMock).not.toHaveBeenCalled();
+  });
+
+  it('skips the Summarizer while its model is only downloadable', async () => {
+    installSummarizerMock('downloadable');
+    pipelineMock.mockResolvedValue(makeTextGenerator('transformers answer'));
+
+    const manager = new LLMManager({});
+    await manager.initialize();
+
+    expect(manager.getActiveProvider()).toBe(LLMProvider.TRANSFORMERS);
   });
 
   it('falls back to Transformers.js when Chrome AI is unavailable', async () => {

@@ -9,8 +9,12 @@ const askBtn = document.getElementById('ask') as HTMLButtonElement;
 const qEl = document.getElementById('q') as HTMLInputElement;
 const logEl = document.getElementById('chat-log')!;
 
+// Add ?no-llm to the URL for a lightweight extractive-only session
+const enableLLM = !new URLSearchParams(location.search).has('no-llm');
+
 const client = new DhiyaClient({
   debug: true,
+  enableLLM,
   onProgress: e => {
     statusEl.textContent = `${e.message}${e.progress !== undefined ? ` (${e.progress}%)` : ''}`;
   }
@@ -83,6 +87,9 @@ askBtn.addEventListener('click', () => void ask());
 qEl.addEventListener('keydown', e => {
   if (e.key === 'Enter') void ask();
 });
+
+// Expose for console experimentation
+(window as any).dhiya = client;
 
 // Boot
 (async () => {

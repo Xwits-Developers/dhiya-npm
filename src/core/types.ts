@@ -119,7 +119,10 @@ export interface TimingInfo {
 // ============================================================================
 
 export enum LLMProvider {
+  /** Chrome Prompt API (LanguageModel) — stable in extensions, origin trial on web pages. */
   CHROME_AI = 'chrome-ai',
+  /** Chrome Summarizer API — stable on web pages since Chrome 138; same on-device model. */
+  CHROME_SUMMARIZER = 'chrome-summarizer',
   TRANSFORMERS = 'transformers',
   NONE = 'none'
 }
@@ -136,6 +139,8 @@ export interface LLMGenerateOptions {
   maxTokens?: number;
   temperature?: number;
   context?: string;
+  /** The user's original question (used by providers that need it separately from the prompt). */
+  query?: string;
   timeout?: number;
   /** Called with each new text fragment as the model generates it. */
   onToken?: (token: string) => void;

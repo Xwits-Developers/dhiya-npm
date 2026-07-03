@@ -4,6 +4,7 @@
 
 import { ILLMProvider, LLMGenerateOptions } from './base.js';
 import { ChromeAIProvider } from './chrome-ai-provider.js';
+import { ChromeSummarizerProvider } from './chrome-summarizer-provider.js';
 import { TransformersProvider } from './transformers-provider.js';
 import { ChromeAIOptions, LLMProvider, LLMStatus, TransformersOptions } from '../core/types.js';
 import { DEFAULT_CHROME_AI_OPTIONS, DEFAULT_TRANSFORMERS_OPTIONS, LLM_TIMEOUTS } from './config.js';
@@ -33,6 +34,7 @@ export class LLMManager {
 
   private static readonly REGISTERED_PROVIDERS: LLMProvider[] = [
     LLMProvider.CHROME_AI,
+    LLMProvider.CHROME_SUMMARIZER,
     LLMProvider.TRANSFORMERS
   ];
 
@@ -64,6 +66,7 @@ export class LLMManager {
     }
 
     this.providers.set(LLMProvider.CHROME_AI, new ChromeAIProvider(this.chromeAIOptions));
+    this.providers.set(LLMProvider.CHROME_SUMMARIZER, new ChromeSummarizerProvider());
     this.providers.set(LLMProvider.TRANSFORMERS, new TransformersProvider(this.transformersOptions));
   }
 
@@ -250,6 +253,7 @@ export class LLMManager {
   private _getDefaultTimeout(): number {
     switch (this.activeProvider) {
       case LLMProvider.CHROME_AI:
+      case LLMProvider.CHROME_SUMMARIZER:
         return LLM_TIMEOUTS.chromeAI;
       case LLMProvider.TRANSFORMERS:
         return LLM_TIMEOUTS.transformers;

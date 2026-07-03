@@ -24,6 +24,13 @@ import { normalizeQuery, hashText } from './utils/normalize.js';
 import { LLMManager } from './llm/llm-manager.js';
 import { classifyQuery, shouldUseLLM, getConversationalResponse, getOutOfScopeResponse, QueryType } from './llm/query-classifier.js';
 
+/**
+ * Bumped whenever chunking or embedding changes shape; documents indexed
+ * under an older version are re-indexed even when their content checksum
+ * is unchanged.
+ */
+const INDEX_VERSION = '2.1';
+
 export class DhiyaClient {
   private config: Required<DhiyaConfig>;
   private embeddings: EmbeddingManager;
@@ -152,7 +159,11 @@ export class DhiyaClient {
       const checksum = await hashText(text);
       const existingManifest = await this.storage.getManifest(docId);
 
-      if (existingManifest && existingManifest.checksum === checksum) {
+      if (
+        existingManifest &&
+        existingManifest.checksum === checksum &&
+        existingManifest.version === INDEX_VERSION
+      ) {
         if (this.config.debug) {
           console.log(`Document ${docId} unchanged, skipping indexing`);
         }
@@ -184,7 +195,7 @@ export class DhiyaClient {
       await this.storage.saveManifest({
         doc_id: docId,
         checksum,
-        version: '2.0',
+        version: INDEX_VERSION,
         updated: Date.now(),
         chunkCount: chunks.length
       });
@@ -333,6 +344,7 @@ export class DhiyaClient {
 
             const generated = await this.llm.generate(llmPrompt, {
               context,
+              query,
               timeout: options.timeout,
               onToken: options.onToken
             });

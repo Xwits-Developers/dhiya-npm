@@ -132,7 +132,7 @@ describe('StorageManager', () => {
 
   it('clearAll wipes chunks, manifests, and cache', async () => {
     await storage.saveChunks([{ id: 'c', doc_id: 'd', source: 's', content: 'x' }]);
-    await storage.saveManifest({ doc_id: 'd', checksum: 'abc', version: '2.0', updated: Date.now(), chunkCount: 1 });
+    await storage.saveManifest({ doc_id: 'd', checksum: 'abc', version: '2.1', updated: Date.now(), chunkCount: 1 });
     await storage.cacheAnswer('q', makeEntry('q'));
 
     await storage.clearAll();

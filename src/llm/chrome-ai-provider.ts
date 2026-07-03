@@ -46,13 +46,19 @@ export class ChromeAIProvider implements ILLMProvider {
     this.options = { ...this.options, ...options };
   }
 
+  /**
+   * Only reports true when the Gemini Nano model is already on disk.
+   * When availability is 'downloadable'/'downloading', session creation
+   * requires a user gesture (NotAllowedError otherwise), so a background
+   * initialization cannot use the provider — fall through to the next one.
+   */
   async isAvailable(): Promise<boolean> {
     try {
       const lm = getLanguageModel();
       if (!lm) return false;
 
       const availability = await lm.availability();
-      return availability === 'available' || availability === 'downloadable' || availability === 'downloading';
+      return availability === 'available';
     } catch {
       return false;
     }
@@ -67,13 +73,16 @@ export class ChromeAIProvider implements ILLMProvider {
     }
 
     const availability = await lm.availability();
-    if (availability === 'unavailable') {
-      throw new Error('Chrome built-in AI is not supported on this device');
+    if (availability !== 'available') {
+      throw new Error(
+        `Chrome built-in AI model is not ready (availability: ${availability}). ` +
+        'The model must be downloaded before Dhiya can use it.'
+      );
     }
 
-    // Creating a session triggers the model download when needed; verify we
-    // can create one, then release it. Per-query sessions are created in
-    // generate() so context never accumulates across unrelated questions.
+    // Verify a session can be created, then release it. Per-query sessions
+    // are created in generate() so context never accumulates across
+    // unrelated questions.
     const session = await lm.create(this.createOptions());
     session.destroy();
     this.verified = true;
