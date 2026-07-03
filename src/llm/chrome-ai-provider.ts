@@ -89,6 +89,11 @@ export class ChromeAIProvider implements ILLMProvider {
   }
 
   async generate(prompt: string, options?: LLMGenerateOptions): Promise<string> {
+    const signal = options?.signal;
+    if (signal?.aborted) {
+      throw new Error('Chrome AI generation aborted');
+    }
+
     const lm = getLanguageModel();
     if (!lm) {
       throw new Error('Chrome built-in AI not available');
@@ -99,7 +104,10 @@ export class ChromeAIProvider implements ILLMProvider {
     }
 
     const systemPrompt = options?.systemPrompt || this.options.systemPrompt;
-    const session = await lm.create(this.createOptions(systemPrompt));
+    const session = await lm.create({
+      ...this.createOptions(systemPrompt),
+      ...(signal ? { signal } : {})
+    });
 
     try {
       const fullPrompt = options?.context
@@ -107,19 +115,23 @@ export class ChromeAIProvider implements ILLMProvider {
         : prompt;
 
       if (options?.onToken) {
-        const stream = session.promptStreaming(fullPrompt);
+        const stream = session.promptStreaming(fullPrompt, signal ? { signal } : undefined);
         const reader = stream.getReader();
         let text = '';
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
+          if (signal?.aborted) {
+            await reader.cancel();
+            throw new Error('Chrome AI generation aborted');
+          }
           text += value;
           options.onToken(value);
         }
         return text.trim();
       }
 
-      const response = await session.prompt(fullPrompt);
+      const response = await session.prompt(fullPrompt, signal ? { signal } : undefined);
       return response.trim();
     } finally {
       session.destroy();

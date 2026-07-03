@@ -20,8 +20,12 @@ export interface ChunkOptions {
   /** Paragraphs shorter than this merge into the following paragraph. */
   minChunkSize?: number;
   maxChunkSize?: number;
+  /** Split on markdown headings and prefix each chunk with its heading path. Default: auto-detect. */
+  markdown?: boolean;
   metadata?: Record<string, any>;
 }
+
+const HEADING_RE = /^(#{1,6})\s+(.+?)\s*#*$/;
 
 /**
  * Split text into chunks with smart boundaries
@@ -44,8 +48,126 @@ export function chunkText(
     return [];
   }
 
-  // 1. Paragraph units, with short paragraphs merged forward
-  const paragraphs = cleanedText.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+  const markdown = options.markdown ?? hasMarkdownHeadings(cleanedText);
+
+  // Markdown: split into sections at headings and carry the heading path into
+  // each chunk so a section's context travels with every piece of it.
+  const sections = markdown
+    ? splitMarkdownSections(cleanedText)
+    : [{ heading: '', body: cleanedText }];
+
+  const contents: string[] = [];
+  for (const section of sections) {
+    // The heading prefix counts against the chunk budget, otherwise emitted
+    // chunks exceed chunkSize and the embedder truncates their tails.
+    const headingCost = section.heading ? section.heading.length + 2 : 0;
+    const effectiveSize = Math.max(50, chunkSize - headingCost);
+    const effectiveOverlap = Math.min(chunkOverlap, Math.floor(effectiveSize / 2));
+
+    const bodyChunks = packBody(section.body, effectiveSize, effectiveOverlap, minUnitSize);
+    for (const chunk of bodyChunks) {
+      contents.push(section.heading ? `${section.heading}\n\n${chunk}` : chunk);
+    }
+    // A heading with no body of its own still becomes a (tiny) chunk so the
+    // section title is retrievable.
+    if (bodyChunks.length === 0 && section.heading) {
+      contents.push(section.heading);
+    }
+  }
+
+  return contents.map((content, index) =>
+    makeChunk(content, index, options.metadata, contents.length)
+  );
+}
+
+interface MarkdownSection {
+  /** The heading path, e.g. "Billing > Refunds" (empty for preamble). */
+  heading: string;
+  body: string;
+}
+
+const FENCE_RE = /^\s*(```|~~~)/;
+
+/**
+ * True when the text contains a markdown heading OUTSIDE fenced code blocks.
+ * A `# comment` inside a ```bash fence must not flip markdown mode.
+ */
+function hasMarkdownHeadings(text: string): boolean {
+  let inFence = false;
+  for (const line of text.split('\n')) {
+    if (FENCE_RE.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence && HEADING_RE.test(line)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Split markdown into sections keyed by their heading path. Each heading opens
+ * a new section; the path accumulates ancestor headings so nested context is
+ * preserved (a chunk under "### Refunds" carries "Billing > Refunds").
+ * Lines inside fenced code blocks are always body — a shell/Python comment
+ * starting with '#' is never treated as a heading.
+ */
+function splitMarkdownSections(text: string): MarkdownSection[] {
+  const lines = text.split('\n');
+  const sections: MarkdownSection[] = [];
+  const stack: Array<{ level: number; title: string }> = [];
+  let bodyLines: string[] = [];
+  let inFence = false;
+
+  const flush = () => {
+    const body = bodyLines.join('\n').trim();
+    const heading = stack.map(s => s.title).join(' > ');
+    if (body || heading) {
+      sections.push({ heading, body });
+    }
+    bodyLines = [];
+  };
+
+  for (const line of lines) {
+    if (FENCE_RE.test(line)) {
+      inFence = !inFence;
+      bodyLines.push(line);
+      continue;
+    }
+
+    const match = inFence ? null : HEADING_RE.exec(line);
+    if (match) {
+      flush();
+      const level = match[1].length;
+      const title = match[2].trim();
+      while (stack.length && stack[stack.length - 1].level >= level) {
+        stack.pop();
+      }
+      stack.push({ level, title });
+    } else {
+      bodyLines.push(line);
+    }
+  }
+  flush();
+
+  return sections.length ? sections : [{ heading: '', body: text }];
+}
+
+/**
+ * Pack a plain-text body into chunks: paragraphs are the unit (short ones
+ * merge forward), and oversized paragraphs split on sentence boundaries.
+ */
+function packBody(
+  body: string,
+  chunkSize: number,
+  chunkOverlap: number,
+  minUnitSize: number
+): string[] {
+  const trimmed = body.trim();
+  if (!trimmed) return [];
+
+  const paragraphs = trimmed.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
   const units: string[] = [];
   let buffer = '';
 
@@ -57,7 +179,6 @@ export function chunkText(
     }
   }
   if (buffer) {
-    // Trailing short paragraph: attach to the previous unit when possible
     if (units.length > 0 && units[units.length - 1].length + buffer.length + 2 <= chunkSize) {
       units[units.length - 1] += `\n\n${buffer}`;
     } else {
@@ -65,7 +186,6 @@ export function chunkText(
     }
   }
 
-  // 2. Split any unit that exceeds chunkSize on sentence boundaries
   const contents: string[] = [];
   for (const unit of units) {
     if (unit.length <= chunkSize) {
@@ -74,10 +194,7 @@ export function chunkText(
       contents.push(...packSentences(unit, chunkSize, chunkOverlap));
     }
   }
-
-  return contents.map((content, index) =>
-    makeChunk(content, index, options.metadata, contents.length)
-  );
+  return contents;
 }
 
 /**

@@ -15,6 +15,9 @@ vi.mock('@huggingface/transformers', () => ({
   env: { allowLocalModels: false, useBrowserCache: false },
   TextStreamer: class {
     constructor(_tokenizer: unknown, _opts: unknown) {}
+  },
+  InterruptableStoppingCriteria: class {
+    interrupt() {}
   }
 }));
 
@@ -201,5 +204,32 @@ describe('LLMManager', () => {
     await manager.initialize();
 
     await expect(manager.generate('q', { timeout: 50 })).rejects.toThrow(/timed out/);
+  });
+
+  it('aborts in-flight generation via an AbortSignal', async () => {
+    pipelineMock.mockResolvedValue(
+      () => new Promise(() => { /* never resolves */ })
+    );
+
+    const manager = new LLMManager({ fallbackOrder: [LLMProvider.TRANSFORMERS] });
+    await manager.initialize();
+
+    const controller = new AbortController();
+    const pending = manager.generate('q', { timeout: 60000, signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toThrow(/aborted/);
+  });
+
+  it('rejects immediately when the signal is already aborted', async () => {
+    pipelineMock.mockResolvedValue(makeTextGenerator('never returned'));
+
+    const manager = new LLMManager({ fallbackOrder: [LLMProvider.TRANSFORMERS] });
+    await manager.initialize();
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      manager.generate('q', { signal: controller.signal })
+    ).rejects.toThrow(/aborted/);
   });
 });

@@ -177,7 +177,9 @@ export class DhiyaClient {
       this.emitProgress(ProgressType.INDEXING, `Chunking document ${docId}...`, 0);
       const chunks = createChunks(text, docId, docId, {
         chunkSize: this.config.chunkSize,
-        chunkOverlap: this.config.chunkOverlap
+        chunkOverlap: this.config.chunkOverlap,
+        // markdownAware=true → auto-detect (undefined); false → force plain text
+        markdown: this.config.markdownAware ? undefined : false
       }, metadata);
 
       this.emitProgress(ProgressType.INDEXING, `Embedding ${chunks.length} chunks...`, 25);
@@ -241,13 +243,16 @@ export class DhiyaClient {
       throw new Error(ERROR_MESSAGES.QUERY_EMPTY);
     }
 
-    const queryEmbedding = await this.embeddings.embed(normalizeQuery(query));
+    const normalized = normalizeQuery(query);
+    const queryEmbedding = await this.embeddings.embed(normalized);
     return this.retriever.retrieve(queryEmbedding, {
       topK: options.topK ?? this.config.topK,
       threshold: options.threshold ?? this.config.similarityThreshold,
       useDiversity: this.config.useDiversity,
-      diversityThreshold: this.config.diversityThreshold
-    });
+      diversityThreshold: this.config.diversityThreshold,
+      hybrid: this.config.hybridSearch,
+      keywordWeight: this.config.keywordWeight
+    }, normalized);
   }
 
   /**
@@ -300,8 +305,10 @@ export class DhiyaClient {
         topK: options.topK || this.config.topK,
         threshold: this.config.similarityThreshold,
         useDiversity: this.config.useDiversity,
-        diversityThreshold: this.config.diversityThreshold
-      });
+        diversityThreshold: this.config.diversityThreshold,
+        hybrid: this.config.hybridSearch,
+        keywordWeight: this.config.keywordWeight
+      }, normalizedQuery);
 
       const retrievalTime = Date.now() - startTime;
 
@@ -346,6 +353,7 @@ export class DhiyaClient {
               context,
               query,
               timeout: options.timeout,
+              signal: options.signal,
               onToken: options.onToken
             });
 

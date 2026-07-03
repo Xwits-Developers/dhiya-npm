@@ -119,6 +119,77 @@ describe('Chunker', () => {
     expect(combined.length).toBeGreaterThanOrEqual(2500);
   });
 
+  it('splits markdown on headings and carries the heading path into each chunk', () => {
+    const md = [
+      '# Billing',
+      '',
+      '## Refunds',
+      '',
+      'Refunds are issued within 30 days of the original purchase date.',
+      '',
+      '## Invoices',
+      '',
+      'Invoices are emailed on the first of each month.'
+    ].join('\n');
+
+    const chunks = chunkText(md, { chunkSize: 900 });
+
+    const refund = chunks.find(c => c.content.includes('Refunds are issued'));
+    const invoice = chunks.find(c => c.content.includes('Invoices are emailed'));
+    expect(refund).toBeTruthy();
+    expect(invoice).toBeTruthy();
+    // Nested heading path travels with the content
+    expect(refund!.content).toContain('Billing > Refunds');
+    expect(invoice!.content).toContain('Billing > Invoices');
+  });
+
+  it('regression: fenced code blocks are never parsed as headings', () => {
+    const md = [
+      '# Setup',
+      '',
+      'Install and configure:',
+      '',
+      '```bash',
+      '# Install dependencies',
+      'npm install',
+      '# Run the build',
+      'npm run build',
+      '```',
+      '',
+      'Then start the server.'
+    ].join('\n');
+
+    const chunks = chunkText(md, { chunkSize: 900 });
+    const combined = chunks.map(c => c.content).join('\n');
+
+    // The shell comments must stay with their code, in order, not become headings
+    expect(combined).toContain('# Install dependencies\nnpm install');
+    expect(combined).toContain('# Run the build\nnpm run build');
+    expect(chunks.some(c => c.content.includes('Setup > Install dependencies'))).toBe(false);
+  });
+
+  it('regression: a # comment inside a fence does not flip plain text into markdown mode', () => {
+    const text = 'Run this:\n\n```sh\n# comment line\necho hi\n```\n\nDone.';
+    const chunks = chunkText(text, { chunkSize: 900 });
+    expect(chunks.some(c => c.content.includes('comment line >'))).toBe(false);
+    expect(chunks.map(c => c.content).join('\n')).toContain('# comment line\necho hi');
+  });
+
+  it('regression: heading prefix counts against the chunk budget', () => {
+    const md = `# Billing\n\n## Refunds and Chargebacks for International Enterprise Customers\n\n${'Refund sentence here. '.repeat(60)}`;
+    const chunks = chunkText(md, { chunkSize: 300 });
+
+    for (const chunk of chunks) {
+      expect(chunk.content.length).toBeLessThanOrEqual(300);
+    }
+  });
+
+  it('auto-detects plain text (no markdown handling) when there are no headings', () => {
+    const chunks = chunkText('Just a normal sentence about widgets and gadgets.', { chunkSize: 900 });
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].content).not.toContain('>');
+  });
+
   it('createChunks assigns stable doc-scoped ids', () => {
     const chunks = createChunks('One two three. '.repeat(100), 'doc-1', 'doc-1', { chunkSize: 200 });
     expect(chunks[0].id).toBe('doc-1-chunk-0');

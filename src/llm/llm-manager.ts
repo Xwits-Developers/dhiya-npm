@@ -135,8 +135,16 @@ export class LLMManager {
 
   /**
    * Generate text with the active provider.
+   *
+   * A caller abort and the timeout both fire one internal AbortSignal that
+   * is handed to the provider, so generation is genuinely interrupted (not
+   * merely abandoned) when either happens.
    */
   async generate(prompt: string, options?: LLMGenerateOptions): Promise<string> {
+    if (options?.signal?.aborted) {
+      throw new Error('LLM generation aborted');
+    }
+
     if (!this.activeProvider) {
       await this.initialize();
     }
@@ -151,11 +159,41 @@ export class LLMManager {
     }
 
     const timeout = options?.timeout || this._getDefaultTimeout();
-    return this._withTimeout(
-      provider.generate(prompt, options),
-      timeout,
-      `LLM generation timed out after ${timeout}ms`
-    );
+    const controller = new AbortController();
+    const onCallerAbort = () => controller.abort();
+    options?.signal?.addEventListener('abort', onCallerAbort, { once: true });
+
+    const timer = setTimeout(() => controller.abort(), timeout);
+
+    // Rejects when the internal signal fires, with a message that reflects
+    // WHY it fired (caller abort vs deadline).
+    const interruption = new Promise<never>((_, reject) => {
+      controller.signal.addEventListener(
+        'abort',
+        () => {
+          reject(
+            new Error(
+              options?.signal?.aborted
+                ? 'LLM generation aborted'
+                : `LLM generation timed out after ${timeout}ms`
+            )
+          );
+        },
+        { once: true }
+      );
+    });
+
+    try {
+      return await Promise.race([
+        provider.generate(prompt, { ...options, signal: controller.signal }),
+        interruption
+      ]);
+    } finally {
+      clearTimeout(timer);
+      options?.signal?.removeEventListener('abort', onCallerAbort);
+      // Settle the interruption promise's rejection silently if it lost the race
+      interruption.catch(() => undefined);
+    }
   }
 
   isAvailable(): boolean {
@@ -235,18 +273,13 @@ export class LLMManager {
     let timeoutHandle: ReturnType<typeof setTimeout>;
 
     const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(errorMessage));
-      }, timeoutMs);
+      timeoutHandle = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
     });
 
     try {
-      const result = await Promise.race([promise, timeoutPromise]);
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
       clearTimeout(timeoutHandle!);
-      return result;
-    } catch (error) {
-      clearTimeout(timeoutHandle!);
-      throw error;
     }
   }
 

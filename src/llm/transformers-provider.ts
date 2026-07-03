@@ -11,6 +11,7 @@ export class TransformersProvider implements ILLMProvider {
   name = LLMProvider.TRANSFORMERS;
   private generator: any = null;
   private streamerCtor: any = null;
+  private stoppingCriteriaCtor: any = null;
   private loadPromise: Promise<void> | null = null;
   private options: TransformersOptions;
 
@@ -44,11 +45,14 @@ export class TransformersProvider implements ILLMProvider {
   }
 
   private async _loadModel(): Promise<void> {
-    const { pipeline, env, TextStreamer } = await import('@huggingface/transformers');
+    const transformers: any = await import('@huggingface/transformers');
+    const { pipeline, env, TextStreamer } = transformers;
 
     env.allowLocalModels = this.options.allowLocalModels;
     env.useBrowserCache = this.options.useBrowserCache;
     this.streamerCtor = TextStreamer;
+    // Lets an AbortSignal interrupt the decode loop mid-generation
+    this.stoppingCriteriaCtor = transformers.InterruptableStoppingCriteria ?? null;
 
     const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
     const requested =
@@ -84,6 +88,11 @@ export class TransformersProvider implements ILLMProvider {
       await this.initialize();
     }
 
+    const signal = options?.signal;
+    if (signal?.aborted) {
+      throw new Error('Transformers.js generation aborted');
+    }
+
     const systemPrompt = options?.systemPrompt || this.options.systemPrompt;
     const userContent = options?.context
       ? `Context:\n${options.context}\n\nQuestion: ${prompt}`
@@ -110,11 +119,33 @@ export class TransformersProvider implements ILLMProvider {
       generationOptions.streamer = new this.streamerCtor(this.generator.tokenizer, {
         skip_prompt: true,
         skip_special_tokens: true,
-        callback_function: (text: string) => options.onToken!(text)
+        callback_function: (text: string) => {
+          if (signal?.aborted) return;
+          options.onToken!(text);
+        }
       });
     }
 
-    const result = await this.generator(messages, generationOptions);
+    // Interrupt the decode loop itself on abort — without this the model
+    // would keep generating to max_new_tokens after the caller gave up.
+    let onAbort: (() => void) | undefined;
+    if (signal && this.stoppingCriteriaCtor) {
+      const stopper = new this.stoppingCriteriaCtor();
+      generationOptions.stopping_criteria = stopper;
+      onAbort = () => stopper.interrupt();
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    let result: any;
+    try {
+      result = await this.generator(messages, generationOptions);
+    } finally {
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+    }
+
+    if (signal?.aborted) {
+      throw new Error('Transformers.js generation aborted');
+    }
 
     // Chat pipelines return the conversation with the assistant reply appended
     const generated = result?.[0]?.generated_text;

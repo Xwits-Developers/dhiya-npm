@@ -21,6 +21,7 @@ export const DEFAULT_CONFIG: Required<Omit<DhiyaConfig, 'onProgress' | 'onError'
   // Chunking
   chunkSize: 900,
   chunkOverlap: 120,
+  markdownAware: true,
 
   // Retrieval. The floor is deliberately permissive: chunks holding several
   // topics dilute cosine scores, and both the grounded LLM prompt and the
@@ -29,6 +30,8 @@ export const DEFAULT_CONFIG: Required<Omit<DhiyaConfig, 'onProgress' | 'onError'
   similarityThreshold: 0.2,
   useDiversity: true,
   diversityThreshold: 0.95,
+  hybridSearch: true,
+  keywordWeight: 0.4,
 
   // LLM
   enableLLM: true,

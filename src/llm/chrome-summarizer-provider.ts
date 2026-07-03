@@ -77,6 +77,10 @@ export class ChromeSummarizerProvider implements ILLMProvider {
   }
 
   async generate(prompt: string, options?: LLMGenerateOptions): Promise<string> {
+    if (options?.signal?.aborted) {
+      throw new Error('Chrome Summarizer generation aborted');
+    }
+
     const summarizerStatic = getSummarizer();
     if (!summarizerStatic) {
       throw new Error('Chrome Summarizer API not available');
@@ -101,9 +105,11 @@ export class ChromeSummarizerProvider implements ILLMProvider {
     });
 
     try {
-      const contextOption = question
-        ? { context: `Answer the question: "${question}". Ignore unrelated content.` }
-        : undefined;
+      const signal = options?.signal;
+      const contextOption = {
+        ...(question ? { context: `Answer the question: "${question}". Ignore unrelated content.` } : {}),
+        ...(signal ? { signal } : {})
+      };
 
       if (options?.onToken) {
         const stream = session.summarizeStreaming(material, contextOption);
@@ -112,6 +118,10 @@ export class ChromeSummarizerProvider implements ILLMProvider {
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
+          if (signal?.aborted) {
+            await reader.cancel();
+            throw new Error('Chrome Summarizer generation aborted');
+          }
           text += value;
           options.onToken(value);
         }

@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-07-03
+
+Quality and integration release — better retrieval, first-class React support,
+and structure-aware ingestion. Fully backward compatible with 2.0.
+
+### Added
+- **Hybrid retrieval (keyword + vector).** Vector similarity is now blended
+  with a BM25 keyword score over the same chunks, so exact terms — product
+  codes, names, acronyms, error strings — that pure embeddings miss are
+  reliably retrieved. On by default; tune with `hybridSearch` and
+  `keywordWeight` (0..1, default 0.4), or set `hybridSearch: false` for
+  pure-vector behavior.
+- **React hook — `dhiya-npm/react`.** `useRAG(config)` owns a client's
+  lifecycle (StrictMode-safe), exposes `ready` / `loading` / `error` /
+  `status`, a streaming `send()` that builds a chat `messages` array, plus
+  `ask()`, `loadKnowledge()`, and `reset()`. `react` is an optional peer
+  dependency, so non-React users are unaffected.
+- **Markdown-aware chunking.** Markdown is split on headings and each chunk
+  carries its heading path (e.g. `Billing > Refunds`), keeping section context
+  with every piece and boosting both keyword and vector relevance. Auto-detected;
+  toggle with `markdownAware`.
+- **Abort support.** `ask(query, { signal })` cancels in-flight LLM generation
+  via an `AbortSignal` (native cancellation on the Chrome providers), returning
+  the extractive answer instead.
+
+### Changed
+- Default `similarityThreshold` lowered to 0.2 and `minLLMSimilarity` to 0.25
+  to match the recalibrated hybrid score distribution.
+- `search(query)` and `ask(query)` now feed the query text into the keyword
+  index automatically (no API change).
+
+### Hardening (from adversarial review of the new code)
+- `similarityThreshold` remains a **pure-cosine floor**: keyword evidence is a
+  saturating *boost* toward 1 (never a penalty), so hybrid can only improve on
+  pure-vector ranking; a chunk below the floor is admitted only on strong
+  lexical evidence with non-negative cosine — keyword noise cannot leak in.
+- BM25 scores are no longer stretched to 1.0 per query (weak best-matches
+  stay weak); single-character identifiers ("C", vitamin "B") are indexed.
+- Markdown parsing is **code-fence aware**: a `# comment` inside a ``` block is
+  never treated as a heading, and heading prefixes count against the chunk
+  size budget so chunks never exceed `chunkSize`.
+- Abort now genuinely interrupts Transformers.js decoding
+  (`InterruptableStoppingCriteria`) and Chrome sessions (native `signal`),
+  including on timeout — not just abandoning the promise; already-aborted
+  signals short-circuit before any provider work.
+- React: concurrent `send()` calls stream into their own message bubbles
+  (stable message `id`s, safe as React keys).
+- The BM25 index skips rebuilding when the chunk set is unchanged.
+
+### Notes
+- 26 new tests (hybrid retrieval, BM25 keyword index, markdown chunking, abort,
+  concurrency, and the React hook rendered with `@testing-library/react`),
+  120 total.
+- Existing IndexedDB indexes re-chunk automatically on the next `loadKnowledge`
+  thanks to the index-version stamp added in 2.0.
+
 ## [2.0.0] - 2026-07-03
 
 Production-grade rewrite focused on answer correctness, real-world Chrome/LLM

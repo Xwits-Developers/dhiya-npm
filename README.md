@@ -13,10 +13,11 @@ npm install dhiya-npm
 
 ## How it works
 
-1. **Ingest** — your text/JSON/URL content is chunked on paragraph and sentence boundaries.
+1. **Ingest** — your text/JSON/URL/markdown content is chunked on heading, paragraph, and sentence boundaries (markdown chunks carry their heading path).
 2. **Embed** — chunks are embedded locally with [Transformers.js](https://github.com/huggingface/transformers.js) (`all-MiniLM-L6-v2`, ~25 MB one-time download, cached by the browser). WebGPU is used when available, WASM otherwise.
 3. **Store** — chunks + vectors persist in IndexedDB, so the index survives reloads and works offline.
-4. **Answer** — questions are embedded, matched by cosine similarity, and answered by a **local LLM grounded in the retrieved chunks**, with token streaming. Without an LLM, Dhiya falls back to extractive answers.
+4. **Retrieve** — **hybrid search** blends vector similarity with BM25 keyword scoring, so both meaning-based matches and exact terms (codes, names, acronyms) rank well.
+5. **Answer** — the top chunks are answered by a **local LLM grounded in the retrieved context**, with token streaming and abort support. Without an LLM, Dhiya falls back to extractive answers.
 
 Three local answer providers, tried in order (all on-device — see [Chrome's built-in AI APIs](https://developer.chrome.com/docs/ai/built-in-apis)):
 
@@ -74,6 +75,34 @@ Widget attributes: `title`, `placeholder`, `welcome`, `accent` (CSS color), `pos
 
 With a bundler, `import 'dhiya-npm/widget'` and either use attributes or hand the element a configured client: `document.querySelector('dhiya-chat').client = myClient`.
 
+## React
+
+`dhiya-npm/react` ships a `useRAG` hook that manages the client lifecycle and streams answers into a chat array (React is an optional peer dependency):
+
+```tsx
+import { useRAG } from 'dhiya-npm/react';
+
+function Support() {
+  const { ready, messages, send } = useRAG({
+    knowledge: { type: 'text', content: 'Our warranty lasts two years. Refunds within 30 days.' }
+  });
+
+  const [q, setQ] = useState('');
+  if (!ready) return <p>Loading…</p>;
+
+  return (
+    <div>
+      {messages.map((m, i) => <p key={i}><b>{m.role}:</b> {m.content}</p>)}
+      <form onSubmit={e => { e.preventDefault(); send(q); setQ(''); }}>
+        <input value={q} onChange={e => setQ(e.target.value)} />
+      </form>
+    </div>
+  );
+}
+```
+
+`useRAG` returns `{ client, ready, loading, error, status, messages, ask, send, loadKnowledge, reset, refreshStatus }`. `send()` streams token-by-token into `messages`; `ask()` returns the full `Answer` without touching the chat history.
+
 ## API
 
 | Method | Description |
@@ -81,7 +110,7 @@ With a bundler, `import 'dhiya-npm/widget'` and either use attributes or hand th
 | `new DhiyaClient(config?)` | Create a client (see configuration below). |
 | `initialize()` | Open storage and load the embedding model. Must be called first. Safe to call repeatedly. |
 | `loadKnowledge(source)` | Ingest `{type:'text'|'json'|'url'|'array', ...}`. Re-loading the same `documentId` with changed content replaces it and invalidates cached answers. Unchanged content is skipped. |
-| `ask(query, options?)` | Retrieval + grounded answer. Options: `topK`, `enableLLM`, `timeout`, `conversationHistory`, `onToken` (streaming), `skipCache`. |
+| `ask(query, options?)` | Retrieval + grounded answer. Options: `topK`, `enableLLM`, `timeout`, `conversationHistory`, `onToken` (streaming), `skipCache`, `signal` (abort). |
 | `search(query, options?)` | Raw scored chunks (`{chunk, similarity}[]`) without answer synthesis. |
 | `getStatus()` | Embedding/LLM/storage/knowledge-base state — useful for loading UIs. |
 | `removeDocument(docId)` | Remove one document and its chunks. |
@@ -103,6 +132,9 @@ const client = new DhiyaClient({
   llmFallbackOrder: ['chrome-ai', 'chrome-summarizer', 'transformers'],
   // retrieval & answers
   chunkSize: 900,                   // paragraphs are the retrieval unit; this caps oversized ones
+  markdownAware: true,              // split markdown on headings, carry heading path into chunks
+  hybridSearch: true,               // blend BM25 keyword scoring with vectors
+  keywordWeight: 0.4,               // 0 = pure vector, 1 = pure keyword
   topK: 5,
   similarityThreshold: 0.2,
   minLLMSimilarity: 0.25,           // below this, skip the LLM (avoids hallucination)

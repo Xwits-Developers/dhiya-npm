@@ -1,7 +1,7 @@
 {
   "name": "dhiya-npm",
-  "version": "2.0.0",
-  "description": "Client-side RAG chatbot for the browser: WebGPU/WASM embeddings, IndexedDB vector store, local LLM answers (Chrome built-in AI or Transformers.js), streaming, and a drop-in <dhiya-chat> widget. No servers, no API keys.",
+  "version": "2.1.0",
+  "description": "Client-side RAG chatbot for the browser: hybrid keyword+vector search, WebGPU/WASM embeddings, IndexedDB store, local LLM answers (Chrome built-in AI or Transformers.js), streaming, React hook, and a drop-in <dhiya-chat> widget. No servers, no API keys.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,6 +10,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js",
+      "default": "./dist/react/index.js"
     },
     "./widget": {
       "types": "./dist/widget/index.d.ts",
@@ -54,7 +59,11 @@
     "rag framework",
     "chatbot widget",
     "chrome built-in ai",
-    "transformers.js"
+    "transformers.js",
+    "hybrid search",
+    "bm25",
+    "react rag",
+    "useRAG"
   ],
   "author": "Deep Parmar <deep.parmar@sunbots.in>",
   "license": "MIT",
@@ -70,14 +79,26 @@
     "@huggingface/transformers": "^4.2.0",
     "idb": "^8.0.3"
   },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@testing-library/react": "^16.1.0",
     "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
     "@vitest/coverage-v8": "^3.2.4",
     "eslint": "^9.16.0",
     "fake-indexeddb": "^6.2.3",
     "happy-dom": "^20.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "typescript": "^5.7.2",
     "vitest": "^3.2.4"
   },

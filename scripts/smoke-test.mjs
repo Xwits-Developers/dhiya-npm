@@ -28,6 +28,10 @@ await assert.rejects(
 const widget = await import('dhiya-npm/widget');
 assert.equal(typeof widget.DhiyaChatElement, 'function', 'DhiyaChatElement export missing');
 
+// React entry must be importable (react is available in this repo)
+const react = await import('dhiya-npm/react');
+assert.equal(typeof react.useRAG, 'function', 'useRAG export missing');
+
 // Chunker sanity: overlap near chunk size must terminate (regression guard)
 const chunks = main.chunkText('word '.repeat(500), { chunkSize: 300, chunkOverlap: 290 });
 assert.ok(chunks.length > 0 && chunks.length < 50, `chunker produced ${chunks.length} chunks`);

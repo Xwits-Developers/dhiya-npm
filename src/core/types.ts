@@ -82,6 +82,10 @@ export interface RetrievalOptions {
   threshold?: number;
   useDiversity?: boolean;
   diversityThreshold?: number;
+  /** Blend BM25 keyword scoring with vector similarity (default true). */
+  hybrid?: boolean;
+  /** Weight of the keyword score in the blend, 0..1 (default 0.4). */
+  keywordWeight?: number;
 }
 
 // ============================================================================
@@ -142,6 +146,8 @@ export interface LLMGenerateOptions {
   /** The user's original question (used by providers that need it separately from the prompt). */
   query?: string;
   timeout?: number;
+  /** Abort in-flight generation. */
+  signal?: AbortSignal;
   /** Called with each new text fragment as the model generates it. */
   onToken?: (token: string) => void;
 }
@@ -186,12 +192,18 @@ export interface DhiyaConfig {
   // Chunking configuration
   chunkSize?: number; // characters
   chunkOverlap?: number; // characters
+  /** Split markdown on headings and carry the heading path into each chunk (default: auto-detect). */
+  markdownAware?: boolean;
 
   // Retrieval configuration
   topK?: number;
   similarityThreshold?: number;
   useDiversity?: boolean;
   diversityThreshold?: number;
+  /** Blend BM25 keyword scoring with vector similarity (default true). */
+  hybridSearch?: boolean;
+  /** Weight of the keyword score in the hybrid blend, 0..1 (default 0.4). */
+  keywordWeight?: number;
 
   // LLM configuration
   enableLLM?: boolean;
@@ -291,6 +303,8 @@ export interface AskOptions {
   onToken?: (token: string) => void;
   /** Skip the answer cache for this query. */
   skipCache?: boolean;
+  /** Abort in-flight LLM generation; the extractive answer is returned instead. */
+  signal?: AbortSignal;
 }
 
 export interface ConversationTurn {
