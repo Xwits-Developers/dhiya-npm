@@ -169,3 +169,9 @@ const client = new DhiyaClient({
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Author
+
+Built by [Deep Parmar](https://deepap.dev) — AI engineer in Ahmedabad, India; CTO & co-founder of [Sunbots Innovations](https://www.sunbots.in/), founder of [Xwits](https://xwits.dev/), and creator of [SmartON](https://www.getsmartonai.com/), AI-powered smart glasses used by 17,000+ blind and visually-impaired users.
+
+Read more about client-side RAG on the blog: [Client-Side RAG: Running AI in Your Browser](https://deepap.dev/blogs/client-side-rag-browser-ai) · [How to Build a RAG Chatbot with Dhiya NPM](https://deepap.dev/blogs/build-rag-chatbot-dhiya-npm)

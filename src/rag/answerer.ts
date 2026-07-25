@@ -199,9 +199,14 @@ export function createLLMPrompt(
 
   prompt += `Context:\n${context}\n\n`;
   prompt += `Question: ${query}\n\n`;
+  // Answer-first phrasing. An earlier version led with the refusal clause, and
+  // small on-device models over-weighted it — they would name the right source
+  // from the context and then claim in the next sentence that they had no
+  // information about it. The refusal remains available, but as the exception.
   prompt +=
-    'Answer the question using only the context above. ' +
-    'If the context does not contain the answer, say you do not have that information.';
+    'Answer the question using the context above, stating the relevant details from it directly. ' +
+    'Do not say the information is missing if it appears in the context. ' +
+    'Only if the context contains nothing relevant, reply that you do not have that information.';
 
   return prompt;
 }

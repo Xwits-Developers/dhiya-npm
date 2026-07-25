@@ -3,7 +3,7 @@
  * via WebGPU (with WASM fallback) using @huggingface/transformers.
  */
 
-import { ILLMProvider, LLMGenerateOptions } from './base.js';
+import { ILLMProvider, LLMGenerateOptions, LLMLoadProgressCallback } from './base.js';
 import { LLMProvider, TransformersOptions } from '../core/types.js';
 import { DEFAULT_TRANSFORMERS_OPTIONS } from './config.js';
 
@@ -14,9 +14,20 @@ export class TransformersProvider implements ILLMProvider {
   private stoppingCriteriaCtor: any = null;
   private loadPromise: Promise<void> | null = null;
   private options: TransformersOptions;
+  private onLoadProgress?: LLMLoadProgressCallback;
+  /** Bytes seen per file so the reported percentage is an aggregate, not per-file. */
+  private fileBytes = new Map<string, { loaded: number; total: number }>();
 
-  constructor(options: TransformersOptions = DEFAULT_TRANSFORMERS_OPTIONS) {
+  constructor(
+    options: TransformersOptions = DEFAULT_TRANSFORMERS_OPTIONS,
+    onLoadProgress?: LLMLoadProgressCallback
+  ) {
     this.options = { ...options };
+    this.onLoadProgress = onLoadProgress;
+  }
+
+  setLoadProgressCallback(callback?: LLMLoadProgressCallback): void {
+    this.onLoadProgress = callback;
   }
 
   setOptions(options: Partial<TransformersOptions>): void {
@@ -62,11 +73,18 @@ export class TransformersProvider implements ILLMProvider {
           ? 'webgpu'
           : 'wasm';
 
-    const load = (device: string) =>
-      pipeline('text-generation', this.options.model, {
+    const load = (device: string) => {
+      // Each attempt reports its own aggregate; a retry on another backend
+      // must not inherit the previous attempt's byte counts.
+      this.fileBytes.clear();
+      return pipeline('text-generation', this.options.model, {
         device: device as any,
-        dtype: (this.options.dtype || 'q4') as any
+        dtype: (this.options.dtype || 'q4') as any,
+        progress_callback: this.onLoadProgress
+          ? (event: any) => this.reportLoadProgress(event)
+          : undefined
       });
+    };
 
     try {
       this.generator = await load(requested);
@@ -81,6 +99,50 @@ export class TransformersProvider implements ILLMProvider {
         );
       }
     }
+  }
+
+  /**
+   * Translate a Transformers.js progress event into an aggregate percentage.
+   *
+   * The library reports per-file byte counts; summing them keeps the number
+   * monotonic across the several files a model is made of, so a UI can show a
+   * single download bar instead of one that restarts per shard.
+   */
+  private reportLoadProgress(event: any): void {
+    if (!this.onLoadProgress) return;
+
+    if (event?.status === 'ready') {
+      this.onLoadProgress({ message: 'Local AI model ready', progress: 100 });
+      return;
+    }
+
+    if (event?.status === 'progress' && typeof event.total === 'number' && event.total > 0) {
+      this.fileBytes.set(event.file, {
+        loaded: Math.min(event.loaded ?? 0, event.total),
+        total: event.total
+      });
+    } else if (event?.status === 'done' && this.fileBytes.has(event.file)) {
+      const entry = this.fileBytes.get(event.file)!;
+      entry.loaded = entry.total;
+    } else if (event?.status !== 'initiate' && event?.status !== 'download') {
+      return;
+    }
+
+    let loaded = 0;
+    let total = 0;
+    for (const entry of this.fileBytes.values()) {
+      loaded += entry.loaded;
+      total += entry.total;
+    }
+
+    // Hold at 99 until 'ready' — the model still has to be compiled onto the
+    // backend after the last byte arrives, and 100% that lingers reads as stuck.
+    const progress = total > 0 ? Math.min(99, Math.round((loaded / total) * 100)) : 0;
+    this.onLoadProgress({
+      message: 'Downloading local AI model',
+      progress,
+      file: event?.file
+    });
   }
 
   async generate(prompt: string, options?: LLMGenerateOptions): Promise<string> {

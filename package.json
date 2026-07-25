@@ -1,6 +1,6 @@
 {
   "name": "dhiya-npm",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Client-side RAG chatbot for the browser: hybrid keyword+vector search, WebGPU/WASM embeddings, IndexedDB store, local LLM answers (Chrome built-in AI or Transformers.js), streaming, React hook, and a drop-in <dhiya-chat> widget. No servers, no API keys.",
   "type": "module",
   "main": "./dist/index.js",
@@ -65,7 +65,7 @@
     "react rag",
     "useRAG"
   ],
-  "author": "Deep Parmar <deep.parmar@sunbots.in>",
+  "author": "Deep Parmar <deep.parmar@sunbots.in> (https://deepap.dev)",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -74,7 +74,7 @@
   "bugs": {
     "url": "https://github.com/Xwits-Developers/dhiya-npm/issues"
   },
-  "homepage": "https://github.com/Xwits-Developers/dhiya-npm#readme",
+  "homepage": "https://deepap.dev",
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
     "idb": "^8.0.3"

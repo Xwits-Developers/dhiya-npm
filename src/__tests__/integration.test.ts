@@ -267,6 +267,46 @@ describe('DhiyaClient Integration', () => {
       expect(hit.text).toContain('parrot');
     });
 
+    it('regression: cache is not shared across different answer configs', async () => {
+      const dbName = `test-db-shared-${Date.now()}-${dbCounter++}`;
+      const query = 'What is the escalation path?';
+      const knowledge = 'The escalation path is tier one, then tier two, then the duty manager.';
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const cacheHits = () =>
+        logSpy.mock.calls.filter(call => String(call[0]).includes('Cache hit for query:')).length;
+
+      const first = freshClient({
+        dbName,
+        debug: true,
+        transformersOptions: { systemPrompt: 'Answer as persona A.' }
+      });
+      await first.initialize();
+      await first.loadKnowledge({ type: 'text', documentId: 'ops', content: knowledge });
+
+      await first.ask(query);
+      expect(cacheHits()).toBe(0); // cold
+      await first.ask(query);
+      expect(cacheHits()).toBe(1); // same config, same query -> hit
+      await first.destroy();
+
+      // Same knowledge base, same query, different system prompt: the previous
+      // answer was worded by a config that no longer applies, so it must not
+      // be replayed.
+      const second = freshClient({
+        dbName,
+        debug: true,
+        transformersOptions: { systemPrompt: 'Answer as persona B.' }
+      });
+      await second.initialize();
+
+      await second.ask(query);
+      expect(cacheHits()).toBe(1); // still 1 — no hit for the new config
+      await second.destroy();
+
+      logSpy.mockRestore();
+    });
+
     it('serves cached answers for repeated queries', async () => {
       await client.loadKnowledge({
         type: 'text',
