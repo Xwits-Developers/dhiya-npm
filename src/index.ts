@@ -50,7 +50,7 @@ export {
 
 // LLM utilities
 export { QueryType, classifyQuery, isConversational, isOutOfScope } from './llm/query-classifier.js';
-export type { ILLMProvider } from './llm/base.js';
+export type { ILLMProvider, LLMLoadProgress, LLMLoadProgressCallback } from './llm/base.js';
 
 // Utilities for advanced users
 export { cosineSimilarity } from './utils/similarity.js';

@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-07-25
+
+Correctness and observability release, driven by building a real on-device
+assistant on top of 2.1.0. Fully backward compatible.
+
+### Added
+- **Local model download progress.** `TransformersProvider` now forwards
+  Transformers.js progress events, and `DhiyaClient` surfaces them through the
+  existing `onProgress` callback as `ProgressType.LLM_LOAD` events carrying a
+  0-100 percentage. Byte counts are aggregated across every file the model is
+  made of, so the number advances monotonically instead of restarting per
+  shard — a UI can finally show a real bar for the one-time ~350 MB fetch
+  rather than an indefinite spinner. New exported types: `LLMLoadProgress`,
+  `LLMLoadProgressCallback`; new `LLMManagerOptions.onLoadProgress`.
+
+### Fixed
+- **Answer cache ignored changes to the model or system prompt.** Cache entries
+  were keyed on the normalized query alone, and the cache is only cleared when
+  the *knowledge base* changes. Switching `transformersOptions.model` or editing
+  a system prompt therefore kept replaying answers worded by the previous
+  configuration, for up to a full `cacheTTL`. Keys are now namespaced by a hash
+  of the answer-shaping config, so a config change misses naturally.
+- **URLs captured trailing sentence punctuation.** `extractUrls` matched
+  greedily, so a link ending a sentence yielded `https://example.com/x.` — which
+  broke the link and, because callers de-duplicate by string, made it a
+  *second* distinct URL alongside the clean one. Answers visibly listed the same
+  link twice. Trailing punctuation is now stripped; closing brackets are only
+  dropped when unbalanced, so `…/Foo_(bar)` survives.
+- **Grounded prompt biased small models toward refusing.** The instruction
+  appended to every LLM prompt led with its refusal clause, which small
+  on-device models over-weighted: they would name the correct source from the
+  context and then claim, in the next sentence, to have no information about it.
+  The instruction is now answer-first, with refusal as the explicit exception.
+
 ## [2.1.0] - 2026-07-03
 
 Quality and integration release — better retrieval, first-class React support,

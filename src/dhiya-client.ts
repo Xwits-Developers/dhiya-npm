@@ -39,6 +39,8 @@ export class DhiyaClient {
   private llm?: LLMManager;
   private initialized = false;
   private initPromise: Promise<void> | null = null;
+  /** Lazily computed hash of the answer-shaping config; namespaces the cache. */
+  private answerConfigFingerprint: string | null = null;
 
   constructor(config?: DhiyaConfig) {
     this.config = mergeConfig(config);
@@ -52,7 +54,11 @@ export class DhiyaClient {
         chromeAIOptions: { ...this.config.chromeAIOptions },
         transformersOptions: { ...this.config.transformersOptions },
         fallbackOrder: [...this.config.llmFallbackOrder],
-        debug: this.config.debug
+        debug: this.config.debug,
+        // Surfaces the one-time local-model download so a UI can show a real
+        // percentage instead of an indefinite spinner.
+        onLoadProgress: event =>
+          this.emitProgress(ProgressType.LLM_LOAD, event.message, event.progress)
       });
     }
   }
@@ -284,10 +290,11 @@ export class DhiyaClient {
       }
 
       const normalizedQuery = normalizeQuery(query);
+      const cacheKey = await this.buildCacheKey(normalizedQuery);
 
       // Answer cache (skipped when a caller wants streaming from scratch)
       if (!options.skipCache) {
-        const cached = await this.storage.getCachedAnswer(normalizedQuery, this.config.cacheTTL);
+        const cached = await this.storage.getCachedAnswer(cacheKey, this.config.cacheTTL);
         if (cached) {
           if (this.config.debug) {
             console.log('Cache hit for query:', query);
@@ -403,8 +410,8 @@ export class DhiyaClient {
 
       // Cache only useful answers (never the "no information" fallback)
       if (!options.skipCache && results.length > 0 && synthesized.confidence > 0) {
-        await this.storage.cacheAnswer(normalizedQuery, {
-          query: normalizedQuery,
+        await this.storage.cacheAnswer(cacheKey, {
+          query: cacheKey,
           answer: this.slimAnswerForCache(answer),
           timestamp: Date.now()
         });
@@ -525,6 +532,37 @@ export class DhiyaClient {
     if (!this.initialized) {
       throw new Error(ERROR_MESSAGES.NOT_INITIALIZED);
     }
+  }
+
+  /**
+   * Cache key for an answer: the normalized query, namespaced by a fingerprint
+   * of everything that shapes how the answer is worded.
+   *
+   * Without the fingerprint, switching model or editing the system prompt keeps
+   * replaying answers produced by the previous configuration — the knowledge
+   * base is unchanged, so the KB-change cache clear never fires, and the stale
+   * answers can outlive the change by a full cache TTL.
+   */
+  private async buildCacheKey(normalizedQuery: string): Promise<string> {
+    if (!this.answerConfigFingerprint) {
+      this.answerConfigFingerprint = (
+        await hashText(
+          JSON.stringify({
+            enableLLM: this.config.enableLLM,
+            fallbackOrder: this.config.llmFallbackOrder,
+            preferred: this.config.preferredProvider,
+            model: this.config.transformersOptions.model,
+            transformersPrompt: this.config.transformersOptions.systemPrompt,
+            chromePrompt: this.config.chromeAIOptions.systemPrompt,
+            maxContextChars: this.config.maxContextChars,
+            singleAnswerMode: this.config.singleAnswerMode,
+            answerLengthLimit: this.config.answerLengthLimit
+          })
+        )
+      ).slice(0, 12);
+    }
+
+    return `${this.answerConfigFingerprint}:${normalizedQuery}`;
   }
 
   private emitProgress(type: ProgressType, message: string, progress?: number): void {

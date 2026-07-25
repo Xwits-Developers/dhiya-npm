@@ -2,7 +2,7 @@
  * LLM Manager - Orchestrates multiple LLM providers
  */
 
-import { ILLMProvider, LLMGenerateOptions } from './base.js';
+import { ILLMProvider, LLMGenerateOptions, LLMLoadProgressCallback } from './base.js';
 import { ChromeAIProvider } from './chrome-ai-provider.js';
 import { ChromeSummarizerProvider } from './chrome-summarizer-provider.js';
 import { TransformersProvider } from './transformers-provider.js';
@@ -14,6 +14,8 @@ export interface LLMManagerOptions {
   chromeAIOptions?: Partial<ChromeAIOptions>;
   transformersOptions?: Partial<TransformersOptions>;
   fallbackOrder?: LLMProvider[];
+  /** Called while a provider downloads/compiles its model (Transformers.js only). */
+  onLoadProgress?: LLMLoadProgressCallback;
 }
 
 export class LLMManager {
@@ -23,6 +25,7 @@ export class LLMManager {
   private chromeAIOptions: ChromeAIOptions;
   private transformersOptions: TransformersOptions;
   private fallbackOrder: LLMProvider[];
+  private onLoadProgress?: LLMLoadProgressCallback;
   /** Providers that failed to initialize; not re-probed until reset. */
   private failedProviders: Set<LLMProvider> = new Set();
   /** True once every provider in the fallback order has been tried and failed. */
@@ -54,6 +57,7 @@ export class LLMManager {
       };
       this.fallbackOrder = this.buildFallbackOrder(options.fallbackOrder);
       this.debug = options.debug ?? false;
+      this.onLoadProgress = options.onLoadProgress;
     }
 
     if (!this.fallbackOrder.length) {
@@ -67,7 +71,10 @@ export class LLMManager {
 
     this.providers.set(LLMProvider.CHROME_AI, new ChromeAIProvider(this.chromeAIOptions));
     this.providers.set(LLMProvider.CHROME_SUMMARIZER, new ChromeSummarizerProvider());
-    this.providers.set(LLMProvider.TRANSFORMERS, new TransformersProvider(this.transformersOptions));
+    this.providers.set(
+      LLMProvider.TRANSFORMERS,
+      new TransformersProvider(this.transformersOptions, this.onLoadProgress)
+    );
   }
 
   /**

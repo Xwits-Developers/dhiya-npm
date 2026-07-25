@@ -57,12 +57,44 @@ export function cleanText(text: string): string {
 }
 
 /**
- * Extract URLs from text
+ * Extract URLs from text.
+ *
+ * Trailing punctuation is stripped: prose almost always ends a sentence right
+ * after a link, and keeping the period would both break the link and make
+ * `https://x/y.` and `https://x/y` look like two different URLs to callers that
+ * de-duplicate. Closing brackets are only dropped when unbalanced, so URLs that
+ * legitimately contain them (Wikipedia's `Foo_(bar)`) survive intact.
  */
 export function extractUrls(text: string): string[] {
   const urlRegex = /https?:\/\/[^\s<>"]+/g;
-  const matches = text.match(urlRegex);
-  return matches || [];
+  const matches = text.match(urlRegex) || [];
+
+  return matches
+    .map(url => {
+      let trimmed = url;
+      // Strip one trailing character at a time so runs like `).` are handled.
+      for (;;) {
+        const last = trimmed[trimmed.length - 1];
+        if (last === undefined) break;
+
+        if ('.,;:!?\'"'.includes(last)) {
+          trimmed = trimmed.slice(0, -1);
+          continue;
+        }
+        if (last === ')' || last === ']') {
+          const open = last === ')' ? '(' : '[';
+          const opens = trimmed.split(open).length - 1;
+          const closes = trimmed.split(last).length - 1;
+          if (closes > opens) {
+            trimmed = trimmed.slice(0, -1);
+            continue;
+          }
+        }
+        break;
+      }
+      return trimmed;
+    })
+    .filter(url => /^https?:\/\/[^/]+/.test(url));
 }
 
 /**

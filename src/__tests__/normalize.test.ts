@@ -122,8 +122,37 @@ describe('Normalize Utils', () => {
     it('should return empty array for no URLs', () => {
       const text = 'No URLs here';
       const urls = extractUrls(text);
-      
+
       expect(urls).toEqual([]);
+    });
+
+    it('should strip trailing sentence punctuation', () => {
+      const text = 'Book at https://calendly.com/xwits/30min.';
+      const urls = extractUrls(text);
+
+      expect(urls).toEqual(['https://calendly.com/xwits/30min']);
+    });
+
+    it('should treat a sentence-final URL as the same link as a bare one', () => {
+      const text =
+        'Schedule at https://calendly.com/xwits/30min. Or reuse https://calendly.com/xwits/30min';
+      const unique = new Set(extractUrls(text));
+
+      expect(unique.size).toBe(1);
+    });
+
+    it('should keep balanced parentheses inside a URL', () => {
+      const text = 'See https://en.wikipedia.org/wiki/Foo_(bar) for details';
+      const urls = extractUrls(text);
+
+      expect(urls).toEqual(['https://en.wikipedia.org/wiki/Foo_(bar)']);
+    });
+
+    it('should drop an unbalanced closing parenthesis', () => {
+      const text = 'Details (see https://example.com/docs) follow';
+      const urls = extractUrls(text);
+
+      expect(urls).toEqual(['https://example.com/docs']);
     });
   });
   
